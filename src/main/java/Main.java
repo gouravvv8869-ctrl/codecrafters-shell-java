@@ -21,8 +21,6 @@ public class Main {
     }
 
     private static BackgroundJob activeJob = null;
-    
-    // Track the current working directory of our shell
     private static File currentWorkingDirectory = new File(System.getProperty("user.dir"));
 
     public static void main(String[] args) {
@@ -41,7 +39,6 @@ public class Main {
                 continue;
             }
 
-            // Tokenize carefully using our quote-aware parser
             List<String> rawTokens = parseTokens(input);
             if (rawTokens.isEmpty()) {
                 continue;
@@ -63,9 +60,15 @@ public class Main {
                 continue;
             }
 
-            // --- Handle 'cd' Builtin ---
             if (command.equals("cd")) {
                 handleCdBuiltin(rawTokens);
+                continue;
+            }
+
+            // --- Handle 'pwd' Builtin ---
+            if (command.equals("pwd")) {
+                System.out.println(currentWorkingDirectory.getAbsolutePath());
+                System.out.flush();
                 continue;
             }
 
@@ -96,7 +99,8 @@ public class Main {
         }
         String target = tokens.get(1);
         
-        if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs") || target.equals("cd")) {
+        // Added 'pwd' here to mark it explicitly as a shell builtin
+        if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs") || target.equals("cd") || target.equals("pwd")) {
             System.out.println(target + " is a shell builtin");
         } else {
             String path = getPath(target);
@@ -113,7 +117,6 @@ public class Main {
         String targetPath = (tokens.size() > 1) ? tokens.get(1) : "~";
 
         File newDir;
-        // Resolve home directory path mapping shortcut
         if (targetPath.equals("~")) {
             String homeEnv = System.getenv("HOME");
             if (homeEnv == null) {
@@ -122,13 +125,11 @@ public class Main {
             newDir = new File(homeEnv);
         } else {
             newDir = new File(targetPath);
-            // If it's a relative path, resolve it against our tracked working directory
             if (!newDir.isAbsolute()) {
                 newDir = new File(currentWorkingDirectory, targetPath);
             }
         }
 
-        // Canonicalize path to clean up duplicate dots like '/tmp/../tmp'
         try {
             newDir = newDir.getCanonicalFile();
         } catch (IOException e) {
@@ -234,8 +235,6 @@ public class Main {
 
         try {
             ProcessBuilder pb = new ProcessBuilder(commandTokens);
-            
-            // CRITICAL: Force the child process to spawn inside our tracked CWD
             pb.directory(currentWorkingDirectory);
 
             if (stdoutRedirectFile != null) {
