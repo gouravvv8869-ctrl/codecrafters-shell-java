@@ -98,25 +98,32 @@ public class Main {
         boolean appendStdout = false;
         boolean appendStderr = false;
 
-        // Parse tokens accurately based on standard stream rules
         for (int i = 0; i < rawTokens.length; i++) {
-            if (rawTokens[i].equals(">") && i + 1 < rawTokens.length) {
+            // Check explicit stdout variations: > or 1>
+            if ((rawTokens[i].equals(">") || rawTokens[i].equals("1>")) && i + 1 < rawTokens.length) {
                 stdoutRedirectFile = rawTokens[i + 1];
                 appendStdout = false;
                 i++;
-            } else if ((rawTokens[i].equals(">>") || rawTokens[i].equals("1>>")) && i + 1 < rawTokens.length) {
+            } 
+            // Check explicit stdout append variations: >> or 1>>
+            else if ((rawTokens[i].equals(">>") || rawTokens[i].equals("1>>")) && i + 1 < rawTokens.length) {
                 stdoutRedirectFile = rawTokens[i + 1];
                 appendStdout = true;
                 i++;
-            } else if (rawTokens[i].equals("2>") && i + 1 < rawTokens.length) {
+            } 
+            // Check stderr overwrite: 2>
+            else if (rawTokens[i].equals("2>") && i + 1 < rawTokens.length) {
                 stderrRedirectFile = rawTokens[i + 1];
                 appendStderr = false;
                 i++;
-            } else if (rawTokens[i].equals("2>>")) {
+            } 
+            // Check stderr append: 2>>
+            else if (rawTokens[i].equals("2>>") && i + 1 < rawTokens.length) {
                 stderrRedirectFile = rawTokens[i + 1];
                 appendStderr = true;
                 i++;
-            } else {
+            } 
+            else {
                 commandTokens.add(rawTokens[i]);
             }
         }
@@ -125,24 +132,22 @@ public class Main {
             return;
         }
 
+        // Quick fallback mechanism for the "echo" command if implemented natively/externally
+        // Ensuring it behaves predictably with ProcessBuilder execution arrays
         try {
             ProcessBuilder pb = new ProcessBuilder(commandTokens);
             
-            // Handle standard output redirection
             if (stdoutRedirectFile != null) {
                 File file = new File(stdoutRedirectFile);
                 if (file.getParentFile() != null) file.getParentFile().mkdirs();
-                
                 pb.redirectOutput(appendStdout ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
             } else {
                 pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             }
 
-            // Handle standard error redirection
             if (stderrRedirectFile != null) {
                 File file = new File(stderrRedirectFile);
                 if (file.getParentFile() != null) file.getParentFile().mkdirs();
-                
                 pb.redirectError(appendStderr ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
             } else {
                 pb.redirectError(ProcessBuilder.Redirect.INHERIT);
