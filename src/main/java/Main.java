@@ -1,5 +1,10 @@
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -29,7 +34,6 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
-            // Automatic reaping point before showing the prompt
             reapAndPrintCompletedJobsOnly();
 
             System.out.print("$ ");
@@ -92,27 +96,20 @@ public class Main {
         scanner.close();
     }
 
-    /**
-     * Automatic prompt reaper: Checks statuses, prints ONLY completed ("Done") jobs,
-     * and clears them from active tracking.
-     */
     private static void reapAndPrintCompletedJobsOnly() {
         int totalJobs = activeJobs.size();
         List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        // Refresh process states
         for (BackgroundJob job : activeJobs) {
             if (job.status.equals("Running") && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
 
-        // Output only what finished
         for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
             if (job.status.equals("Done")) {
                 String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
-
                 String cleanCmd = job.command;
                 if (cleanCmd.endsWith("&")) {
                     cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
@@ -122,47 +119,28 @@ public class Main {
             }
         }
         System.out.flush();
-
         activeJobs.removeAll(jobsToRemove);
+    }
+
+    private static void handleJobsBuiltin() {
+        reapAndPrintCompletedJobsOnly();
+
+        int remainingTotal = activeJobs.size();
+        for (int i = 0; i < remainingTotal; i++) {
+            BackgroundJob job = activeJobs.get(i);
+            String symbol = (i == remainingTotal - 1) ? "+" : (i == remainingTotal - 2) ? "-" : " ";
+            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+        }
+        System.out.flush();
+    }
+
+    private static boolean isBuiltIn(String cmd) {
+        return cmd.equals("echo") || cmd.equals("type") || cmd.equals("cd") || cmd.equals("pwd") || cmd.equals("jobs") || cmd.equals("exit");
     }
 
     /**
-     * Builtin 'jobs' handler: Refreshes execution states, prints EVERYTHING sequentially
-     * in original ID order, and clears out the finished ones afterward.
+     * Executes pipelines natively, handling a mixture of shell builtins and external binaries.
      */
-    private static void handleJobsBuiltin() {
-        int totalJobs = activeJobs.size();
-        List<BackgroundJob> jobsToRemove = new ArrayList<>();
-
-        // 1. Refresh states first without printing anything yet
-        for (BackgroundJob job : activeJobs) {
-            if (job.status.equals("Running") && !job.process.isAlive()) {
-                job.status = "Done";
-            }
-        }
-
-        // 2. Print everything sequentially in index order (1, 2, 3...)
-        for (int i = 0; i < totalJobs; i++) {
-            BackgroundJob job = activeJobs.get(i);
-            String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
-
-            if (job.status.equals("Done")) {
-                String cleanCmd = job.command;
-                if (cleanCmd.endsWith("&")) {
-                    cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
-                }
-                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
-                jobsToRemove.add(job);
-            } else {
-                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
-            }
-        }
-        System.out.flush();
-
-        // 3. Clean up the reaped entries after the full table has been printed
-        activeJobs.removeAll(jobsToRemove);
-    }
-
     private static void executePipeline(List<String> rawTokens, boolean isBackground, String rawInput) {
         List<String> tokens = new ArrayList<>(rawTokens);
         if (isBackground && !tokens.isEmpty() && tokens.get(tokens.size() - 1).equals("&")) {
@@ -173,85 +151,134 @@ public class Main {
         List<String> cmd1Tokens = new ArrayList<>(tokens.subList(0, pipeIndex));
         List<String> cmd2Tokens = new ArrayList<>(tokens.subList(pipeIndex + 1, tokens.size()));
 
-        List<String> cleanCmd1 = new ArrayList<>();
-        String leftStdinFile = null;
-        for (int i = 0; i < cmd1Tokens.size(); i++) {
-            String t = cmd1Tokens.get(i);
-            if (t.equals("<") && i + 1 < cmd1Tokens.size()) {
-                leftStdinFile = cmd1Tokens.get(i + 1);
-                i++;
-            } else {
-                cleanCmd1.add(t);
-            }
-        }
+        String firstCmd = cmd1Tokens.isEmpty() ? "" : cmd1Tokens.get(0);
+        String secondCmd = cmd2Tokens.isEmpty() ? "" : cmd2Tokens.get(0);
 
-        List<String> cleanCmd2 = new ArrayList<>();
-        String rightStdoutFile = null;
-        boolean appendStdout = false;
-        for (int i = 0; i < cmd2Tokens.size(); i++) {
-            String t = cmd2Tokens.get(i);
-            if ((t.equals(">") || t.equals("1>")) && i + 1 < cmd2Tokens.size()) {
-                rightStdoutFile = cmd2Tokens.get(i + 1);
-                appendStdout = false;
-                i++;
-            } else if ((t.equals(">>") || t.equals("1>>")) && i + 1 < cmd2Tokens.size()) {
-                rightStdoutFile = cmd2Tokens.get(i + 1);
-                appendStdout = true;
-                i++;
-            } else {
-                cleanCmd2.add(t);
-            }
-        }
-
-        try {
-            ProcessBuilder pb1 = new ProcessBuilder(cleanCmd1).directory(currentWorkingDirectory);
-            ProcessBuilder pb2 = new ProcessBuilder(cleanCmd2).directory(currentWorkingDirectory);
-
-            if (leftStdinFile != null) {
-                File file = new File(leftStdinFile);
-                if (!file.isAbsolute()) file = new File(currentWorkingDirectory, leftStdinFile);
-                pb1.redirectInput(file);
-            } else {
-                pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
-            }
-            pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-            if (rightStdoutFile != null) {
-                File file = new File(rightStdoutFile);
-                if (!file.isAbsolute()) file = new File(currentWorkingDirectory, rightStdoutFile);
-                if (file.getParentFile() != null) file.getParentFile().mkdirs();
-                pb2.redirectOutput(appendStdout ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
-            } else {
+        // --- CASE 1: Left command is a Builtin (e.g., echo apple | wc) ---
+        if (isBuiltIn(firstCmd)) {
+            try {
+                ProcessBuilder pb2 = new ProcessBuilder(cmd2Tokens).directory(currentWorkingDirectory);
                 pb2.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
+                pb2.redirectInput(ProcessBuilder.Redirect.PIPE);
+
+                Process p2 = pb2.start();
+
+                // Capture standard output of the builtin and pump it straight down p2's pipe
+                try (PrintStream outStream = new PrintStream(p2.getOutputStream())) {
+                    PrintStream originalOut = System.out;
+                    System.setOut(outStream);
+                    
+                    if (firstCmd.equals("echo")) {
+                        handleEchoExecution(cmd1Tokens);
+                    } else if (firstCmd.equals("pwd")) {
+                        System.out.println(currentWorkingDirectory.getAbsolutePath());
+                    } else if (firstCmd.equals("type")) {
+                        handleTypeBuiltin(cmd1Tokens);
+                    }
+                    
+                    System.setOut(originalOut);
+                }
+
+                if (!isBackground) {
+                    p2.waitFor();
+                } else {
+                    trackBackgroundJob(p2, rawInput);
+                }
+            } catch (Exception e) {
+                System.out.println("Pipeline error");
             }
+            return;
+        }
+
+        // --- CASE 2: Right command is a Builtin (e.g., ls | type exit) ---
+        if (isBuiltIn(secondCmd)) {
+            try {
+                ProcessBuilder pb1 = new ProcessBuilder(cmd1Tokens).directory(currentWorkingDirectory);
+                pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
+                pb1.redirectOutput(ProcessBuilder.Redirect.PIPE);
+
+                Process p1 = pb1.start();
+
+                // We must drain the left command's output stream completely so it doesn't block or deadlock
+                Thread streamDrainer = new Thread(() -> {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(p1.getInputStream()))) {
+                        while (reader.readLine() != null) {
+                            // Consuming data as required by pipeline design, but builtins like 'type' will ignore it
+                        }
+                    } catch (IOException e) {
+                        // Closed channel
+                    }
+                });
+                streamDrainer.start();
+
+                // Run the second command natively inside the main loop shell process context
+                if (secondCmd.equals("type")) {
+                    handleTypeBuiltin(cmd2Tokens);
+                } else if (secondCmd.equals("echo")) {
+                    handleEchoExecution(cmd2Tokens);
+                } else if (secondCmd.equals("pwd")) {
+                    System.out.println(currentWorkingDirectory.getAbsolutePath());
+                }
+
+                if (!isBackground) {
+                    p1.waitFor();
+                    streamDrainer.join();
+                }
+            } catch (Exception e) {
+                System.out.println("Pipeline error");
+            }
+            return;
+        }
+
+        // --- CASE 3: Standard External Pipeline (e.g., cat file | wc) ---
+        try {
+            ProcessBuilder pb1 = new ProcessBuilder(cmd1Tokens).directory(currentWorkingDirectory);
+            ProcessBuilder pb2 = new ProcessBuilder(cmd2Tokens).directory(currentWorkingDirectory);
+
+            pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
+            pb2.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
 
             List<Process> pipeline = ProcessBuilder.startPipeline(List.of(pb1, pb2));
             Process finalProcess = pipeline.get(pipeline.size() - 1);
 
             if (isBackground) {
-                long pid = finalProcess.toHandle().pid();
-                int nextJobId = 1;
-                if (!activeJobs.isEmpty()) {
-                    int maxId = 0;
-                    for (BackgroundJob job : activeJobs) {
-                        if (job.id > maxId) maxId = job.id;
-                    }
-                    nextJobId = maxId + 1;
-                }
-                BackgroundJob newJob = new BackgroundJob(nextJobId, pid, rawInput, finalProcess);
-                activeJobs.add(newJob);
-
-                System.out.printf("[%d] %d\n", newJob.id, newJob.pid);
-                System.out.flush();
+                trackBackgroundJob(finalProcess, rawInput);
             } else {
                 finalProcess.waitFor();
             }
-
         } catch (IOException | InterruptedException e) {
-            System.out.println("pipeline execution failed");
-            System.out.flush();
+            System.out.println("Pipeline failed");
         }
+    }
+
+    private static void handleEchoExecution(List<String> tokens) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < tokens.size(); i++) {
+            sb.append(tokens.get(i));
+            if (i < tokens.size() - 1) sb.append("");
+        }
+        System.out.println(sb.toString());
+        System.out.flush();
+    }
+
+    private static void trackBackgroundJob(Process p, String rawInput) {
+        long pid = p.toHandle().pid();
+        int nextJobId = 1;
+        if (!activeJobs.isEmpty()) {
+            int maxId = 0;
+            for (BackgroundJob job : activeJobs) {
+                if (job.id > maxId) maxId = job.id;
+            }
+            nextJobId = maxId + 1;
+        }
+        BackgroundJob newJob = new BackgroundJob(nextJobId, pid, rawInput, p);
+        activeJobs.add(newJob);
+        System.out.printf("[%d] %d\n", newJob.id, newJob.pid);
+        System.out.flush();
     }
 
     private static void executeCommand(String fullCommand, boolean isBackground) {
@@ -314,19 +341,7 @@ public class Main {
             Process process = pb.start();
 
             if (isBackground) {
-                long pid = process.toHandle().pid();
-                int nextJobId = 1;
-                if (!activeJobs.isEmpty()) {
-                    int maxId = 0;
-                    for (BackgroundJob job : activeJobs) {
-                        if (job.id > maxId) maxId = job.id;
-                    }
-                    nextJobId = maxId + 1;
-                }
-                BackgroundJob newJob = new BackgroundJob(nextJobId, pid, fullCommand, process);
-                activeJobs.add(newJob);
-                System.out.printf("[%d] %d\n", newJob.id, newJob.pid);
-                System.out.flush();
+                trackBackgroundJob(process, fullCommand);
             } else {
                 process.waitFor();
             }
