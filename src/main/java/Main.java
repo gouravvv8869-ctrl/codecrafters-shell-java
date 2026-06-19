@@ -99,19 +99,32 @@ public class Main {
                     current.append(c);
                 }
             } else if (inDoubleQuotes) {
-                if (c == '"') {
+                if (c == '\\') {
+                    if (i + 1 < input.length()) {
+                        char next = input.charAt(i + 1);
+                        if (next == '"' || next == '\\') {
+                            // Only escape " and \ inside double quotes (for this stage)
+                            current.append(next);
+                            i++; // consume the escaped character
+                        } else {
+                            // For all other characters, backslash is literal
+                            current.append(c);
+                        }
+                    } else {
+                        current.append(c);
+                    }
+                } else if (c == '"') {
                     inDoubleQuotes = false;
                 } else {
                     current.append(c);
                 }
             } else {
-                // Backslash escaping outside quotes
+                // Outside any quotes
                 if (c == '\\') {
                     if (i + 1 < input.length()) {
-                        i++; // skip the backslash
+                        i++;
                         current.append(input.charAt(i));
                     } else {
-                        // trailing backslash - ignore or keep as is (per spec, usually kept)
                         current.append(c);
                     }
                 } else if (c == '\'') {
