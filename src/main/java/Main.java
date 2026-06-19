@@ -12,6 +12,7 @@ import java.util.Set;
 
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
+    private static int nextJobId = 1;
 
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -46,76 +47,21 @@ public class Main {
                 }
                 System.exit(code);
             } else if (command.equals("echo")) {
-                StringBuilder message = new StringBuilder();
-                for (int i = 0; i < parsed.args.size(); i++) {
-                    if (i > 0) message.append(" ");
-                    message.append(parsed.args.get(i));
-                }
-                String output = message.toString() + "\n";
-
-                if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, output, parsed.appendOutput);
-                } else {
-                    System.out.print(output);
-                }
-
-                if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", parsed.appendError);
-                }
+                handleEcho(parsed);
             } else if (command.equals("type")) {
-                if (parsed.args.isEmpty()) {
-                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "", parsed.appendError);
-                    continue;
-                }
-                String arg = parsed.args.get(0);
-                String result;
-                if (BUILTINS.contains(arg)) {
-                    result = arg + " is a shell builtin\n";
-                } else {
-                    String foundPath = findInPath(arg);
-                    if (foundPath != null) {
-                        result = arg + " is " + foundPath + "\n";
-                    } else {
-                        result = arg + ": not found\n";
-                    }
-                }
-                if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, result, parsed.appendOutput);
-                } else {
-                    System.out.print(result);
-                }
-                if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", parsed.appendError);
-                }
+                handleType(parsed);
             } else if (command.equals("pwd")) {
-                String output = System.getProperty("user.dir") + "\n";
-                if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, output, parsed.appendOutput);
-                } else {
-                    System.out.print(output);
-                }
-                if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", parsed.appendError);
-                }
+                handlePwd(parsed);
             } else if (command.equals("cd")) {
-                if (!parsed.args.isEmpty()) {
-                    changeDirectory(parsed.args.get(0));
-                }
-                if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", parsed.appendError);
-                }
+                handleCd(parsed);
             } else if (command.equals("jobs")) {
-                // Empty implementation for this stage - just do nothing
-                if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", parsed.appendError);
-                }
-                // No output for now
+                handleJobs(parsed);
             } else {
                 // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
                     runExternalProgram(command, parsed.args, parsed.outputFile, parsed.appendOutput, 
-                                     parsed.errorFile, parsed.appendError);
+                                     parsed.errorFile, parsed.appendError, parsed.background);
                 } else {
                     System.out.println(command + ": command not found");
                     if (parsed.errorFile != null) {
@@ -133,6 +79,7 @@ public class Main {
         boolean appendOutput = false;
         String errorFile = null;
         boolean appendError = false;
+        boolean background = false;
     }
 
     private static ParseResult parseCommand(String[] parts) {
@@ -145,7 +92,11 @@ public class Main {
 
         while (i < parts.length) {
             String token = parts[i];
-            if (token.equals(">") || token.equals("1>")) {
+
+            if (token.equals("&") && i == parts.length - 1) {
+                result.background = true;
+                i++;
+            } else if (token.equals(">") || token.equals("1>")) {
                 result.appendOutput = false;
                 i++;
                 if (i < parts.length) {
@@ -179,6 +130,80 @@ public class Main {
             }
         }
         return result;
+    }
+
+    private static void handleEcho(ParseResult parsed) {
+        StringBuilder message = new StringBuilder();
+        for (int i = 0; i < parsed.args.size(); i++) {
+            if (i > 0) message.append(" ");
+            message.append(parsed.args.get(i));
+        }
+        String output = message.toString() + "\n";
+
+        if (parsed.outputFile != null) {
+            writeToFile(parsed.outputFile, output, parsed.appendOutput);
+        } else {
+            System.out.print(output);
+        }
+
+        if (parsed.errorFile != null) {
+            writeToFile(parsed.errorFile, "", parsed.appendError);
+        }
+    }
+
+    private static void handleType(ParseResult parsed) {
+        if (parsed.args.isEmpty()) {
+            if (parsed.errorFile != null) writeToFile(parsed.errorFile, "", parsed.appendError);
+            return;
+        }
+        String arg = parsed.args.get(0);
+        String result;
+        if (BUILTINS.contains(arg)) {
+            result = arg + " is a shell builtin\n";
+        } else {
+            String foundPath = findInPath(arg);
+            if (foundPath != null) {
+                result = arg + " is " + foundPath + "\n";
+            } else {
+                result = arg + ": not found\n";
+            }
+        }
+        if (parsed.outputFile != null) {
+            writeToFile(parsed.outputFile, result, parsed.appendOutput);
+        } else {
+            System.out.print(result);
+        }
+        if (parsed.errorFile != null) {
+            writeToFile(parsed.errorFile, "", parsed.appendError);
+        }
+    }
+
+    private static void handlePwd(ParseResult parsed) {
+        String output = System.getProperty("user.dir") + "\n";
+        if (parsed.outputFile != null) {
+            writeToFile(parsed.outputFile, output, parsed.appendOutput);
+        } else {
+            System.out.print(output);
+        }
+        if (parsed.errorFile != null) {
+            writeToFile(parsed.errorFile, "", parsed.appendError);
+        }
+    }
+
+    private static void handleCd(ParseResult parsed) {
+        if (!parsed.args.isEmpty()) {
+            changeDirectory(parsed.args.get(0));
+        }
+        if (parsed.errorFile != null) {
+            writeToFile(parsed.errorFile, "", parsed.appendError);
+        }
+    }
+
+    private static void handleJobs(ParseResult parsed) {
+        // Empty for this stage
+        if (parsed.errorFile != null) {
+            writeToFile(parsed.errorFile, "", parsed.appendError);
+        }
     }
 
     private static String[] tokenize(String input) {
@@ -254,7 +279,8 @@ public class Main {
 
     private static void runExternalProgram(String command, List<String> args, 
                                            String outputFile, boolean appendOutput, 
-                                           String errorFile, boolean appendError) {
+                                           String errorFile, boolean appendError,
+                                           boolean background) {
         try {
             List<String> commandList = new ArrayList<>();
             commandList.add(command);
@@ -280,7 +306,15 @@ public class Main {
             }
 
             Process process = builder.start();
-            process.waitFor();
+
+            if (background) {
+                int jobId = nextJobId++;
+                long pid = process.pid();           // Java 9+
+                System.out.println("[" + jobId + "] " + pid);
+                // Do NOT wait - run in background
+            } else {
+                process.waitFor();
+            }
         } catch (IOException | InterruptedException e) {
             System.out.println(command + ": command not found");
         }
