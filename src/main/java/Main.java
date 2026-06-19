@@ -51,23 +51,42 @@ public class Main {
                     message.append(parsed.args.get(i));
                 }
                 String output = message.toString() + "\n";
+
                 if (parsed.outputFile != null) {
                     writeToFile(parsed.outputFile, output);
                 } else {
                     System.out.print(output);
                 }
+
+                // Always create/truncate error file if 2> is used (even if empty)
+                if (parsed.errorFile != null) {
+                    writeToFile(parsed.errorFile, "");
+                }
+
             } else if (command.equals("type")) {
-                if (parsed.args.isEmpty()) continue;
+                if (parsed.args.isEmpty()) {
+                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "");
+                    continue;
+                }
                 String arg = parsed.args.get(0);
+                String result;
                 if (BUILTINS.contains(arg)) {
-                    System.out.println(arg + " is a shell builtin");
+                    result = arg + " is a shell builtin\n";
                 } else {
                     String foundPath = findInPath(arg);
                     if (foundPath != null) {
-                        System.out.println(arg + " is " + foundPath);
+                        result = arg + " is " + foundPath + "\n";
                     } else {
-                        System.out.println(arg + ": not found");
+                        result = arg + ": not found\n";
                     }
+                }
+                if (parsed.outputFile != null) {
+                    writeToFile(parsed.outputFile, result);
+                } else {
+                    System.out.print(result);
+                }
+                if (parsed.errorFile != null) {
+                    writeToFile(parsed.errorFile, "");
                 }
             } else if (command.equals("pwd")) {
                 String output = System.getProperty("user.dir") + "\n";
@@ -76,9 +95,15 @@ public class Main {
                 } else {
                     System.out.print(output);
                 }
+                if (parsed.errorFile != null) {
+                    writeToFile(parsed.errorFile, "");
+                }
             } else if (command.equals("cd")) {
                 if (!parsed.args.isEmpty()) {
                     changeDirectory(parsed.args.get(0));
+                }
+                if (parsed.errorFile != null) {
+                    writeToFile(parsed.errorFile, "");
                 }
             } else {
                 // External command
@@ -87,6 +112,9 @@ public class Main {
                     runExternalProgram(command, parsed.args, parsed.outputFile, parsed.errorFile);
                 } else {
                     System.out.println(command + ": command not found");
+                    if (parsed.errorFile != null) {
+                        writeToFile(parsed.errorFile, "");
+                    }
                 }
             }
         }
@@ -211,21 +239,14 @@ public class Main {
 
             if (outputFile != null) {
                 builder.redirectOutput(new File(outputFile));
-            }
-            if (errorFile != null) {
-                builder.redirectError(new File(errorFile));
+            } else {
+                builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             }
 
-            // Inherit the streams that are not redirected
-            if (outputFile == null && errorFile == null) {
-                builder.inheritIO();
+            if (errorFile != null) {
+                builder.redirectError(new File(errorFile));
             } else {
-                if (outputFile == null) {
-                    builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                }
-                if (errorFile == null) {
-                    builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-                }
+                builder.redirectError(ProcessBuilder.Redirect.INHERIT);
             }
 
             Process process = builder.start();
