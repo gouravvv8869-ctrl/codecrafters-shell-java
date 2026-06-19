@@ -11,7 +11,18 @@ public class Main {
             String input = reader.readLine();
             if (input == null) break;
 
-            if (input.startsWith("echo ")) {
+            if (input.equals("exit") || input.startsWith("exit ")) {
+                int code = 0;
+                String[] parts = input.split("\\s+");
+                if (parts.length > 1) {
+                    try {
+                        code = Integer.parseInt(parts[1]);
+                    } catch (NumberFormatException e) {
+                        code = 0;
+                    }
+                }
+                System.exit(code);
+            } else if (input.startsWith("echo ")) {
                 String message = input.substring(5);
                 System.out.println(message);
             } else {
