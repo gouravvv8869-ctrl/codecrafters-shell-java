@@ -30,14 +30,13 @@ public class Main {
                 continue;
             }
 
-            // Parse command, arguments and redirections
             ParseResult parsed = parseCommand(parts);
 
             String command = parsed.command;
 
             if (command.equals("exit")) {
                 int code = 0;
-                if (parsed.args.size() > 0) {
+                if (!parsed.args.isEmpty()) {
                     try {
                         code = Integer.parseInt(parsed.args.get(0));
                     } catch (NumberFormatException e) {
@@ -51,13 +50,13 @@ public class Main {
                     if (i > 0) message.append(" ");
                     message.append(parsed.args.get(i));
                 }
+                String output = message.toString() + "\n";
                 if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, message.toString() + "\n");
+                    writeToFile(parsed.outputFile, output);
                 } else {
-                    System.out.println(message);
+                    System.out.print(output);
                 }
             } else if (command.equals("type")) {
-                // For simplicity, type doesn't support redirection in this stage
                 if (parsed.args.isEmpty()) continue;
                 String arg = parsed.args.get(0);
                 if (BUILTINS.contains(arg)) {
@@ -71,18 +70,17 @@ public class Main {
                     }
                 }
             } else if (command.equals("pwd")) {
-                String output = System.getProperty("user.dir");
+                String output = System.getProperty("user.dir") + "\n";
                 if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, output + "\n");
+                    writeToFile(parsed.outputFile, output);
                 } else {
-                    System.out.println(output);
+                    System.out.print(output);
                 }
             } else if (command.equals("cd")) {
                 if (!parsed.args.isEmpty()) {
                     changeDirectory(parsed.args.get(0));
                 }
             } else {
-                // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
                     runExternalProgram(command, parsed.args, parsed.outputFile);
@@ -115,8 +113,7 @@ public class Main {
                     result.outputFile = parts[i];
                     i++;
                 }
-                // Only support one redirection for now
-                break;
+                break; // Only one redirection for now
             } else {
                 result.args.add(token);
                 i++;
@@ -192,7 +189,7 @@ public class Main {
         try (PrintStream ps = new PrintStream(filename)) {
             ps.print(content);
         } catch (IOException e) {
-            System.out.println("Error writing to file: " + e.getMessage());
+            System.err.println("Error writing to file: " + e.getMessage());
         }
     }
 
@@ -207,7 +204,7 @@ public class Main {
 
             if (outputFile != null) {
                 builder.redirectOutput(new File(outputFile));
-                // Do NOT redirect error - errors should go to terminal
+                builder.redirectError(ProcessBuilder.Redirect.INHERIT);  // ← Important fix
             } else {
                 builder.inheritIO();
             }
