@@ -1,20 +1,20 @@
-import java.util.Scanner;
+const readline = require("readline");
 
-public class Main {
-    public static void main(String[] args) throws Exception {
-        Scanner scanner = new Scanner(System.in);
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
-        while (true) {
-            System.out.print("$ ");
-
-            String input = scanner.nextLine();
-            String commandName = input.split(" ")[0];
-
-            if (commandName.equals("exit")) {
-                System.exit(0);
-            }
-
-            System.out.println(commandName + ": command not found");
-        }
+function prompt() {
+  rl.question("$ ", (answer) => {
+    if (answer.startsWith("echo ")) {
+      const args = answer.slice("echo ".length);
+      console.log(args);
+    } else {
+      console.log(`${answer}: command not found`);
     }
+    prompt();
+  });
 }
+
+prompt();
