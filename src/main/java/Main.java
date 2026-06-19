@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd");
 
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -55,6 +55,12 @@ public class Main {
                 }
             } else if (command.equals("pwd")) {
                 System.out.println(System.getProperty("user.dir"));
+            } else if (command.equals("cd")) {
+                if (parts.length < 2) {
+                    continue;
+                }
+                String targetPath = parts[1];
+                changeDirectory(targetPath);
             } else {
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
@@ -62,6 +68,25 @@ public class Main {
                 } else {
                     System.out.println(command + ": command not found");
                 }
+            }
+        }
+    }
+
+    private static void changeDirectory(String targetPath) {
+        File target = new File(targetPath);
+        if (target.isAbsolute()) {
+            if (target.isDirectory()) {
+                System.setProperty("user.dir", target.getAbsolutePath());
+            } else {
+                System.out.println("cd: " + targetPath + ": No such file or directory");
+            }
+        } else {
+            // Relative paths and ~ are handled in later stages.
+            File resolved = new File(System.getProperty("user.dir"), targetPath);
+            if (resolved.isDirectory()) {
+                System.setProperty("user.dir", resolved.getAbsolutePath());
+            } else {
+                System.out.println("cd: " + targetPath + ": No such file or directory");
             }
         }
     }
@@ -75,6 +100,7 @@ public class Main {
             }
 
             ProcessBuilder builder = new ProcessBuilder(commandList);
+            builder.directory(new File(System.getProperty("user.dir")));
             builder.inheritIO();
             Process process = builder.start();
             process.waitFor();
