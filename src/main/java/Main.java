@@ -1,14 +1,12 @@
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.util.Scanner;
 
-public class Shell {
+public class Main {
 
     // Simple class to store our single background job's details
     static class BackgroundJob {
         int id;
-        long pid; // Using long as Process.pid() returns a long in modern Java
+        long pid; // Process.pid() returns a long
         String command;
         String status;
 
@@ -20,8 +18,7 @@ public class Shell {
         }
     }
 
-    // Since this stage only tests a single background job, 
-    // a single static reference is sufficient.
+    // Single static reference for this stage's background job
     private static BackgroundJob activeJob = null;
 
     public static void main(String[] args) {
@@ -38,7 +35,7 @@ public class Shell {
                 continue;
             }
 
-            // Handle the 'exit' command to safely close the shell
+            // Handle the 'exit' command
             if (input.equals("exit")) {
                 break;
             }
@@ -54,7 +51,6 @@ public class Shell {
             String commandToRun = input;
             if (input.endsWith("&")) {
                 isBackground = true;
-                // Keep the trailing '&' in the command string as expected by the tester
                 commandToRun = input; 
             }
 
@@ -65,37 +61,32 @@ public class Shell {
 
     private static void handleJobsBuiltin() {
         if (activeJob != null) {
-            // %-24s left-aligns the status string and pads it with spaces to exactly 24 characters
+            // %-24s left-aligns the status and pads it with spaces to exactly 24 characters
             System.out.printf("[%d]+  %-24s %s\n", activeJob.id, activeJob.status, activeJob.command);
         }
     }
 
     private static void executeCommand(String fullCommand, boolean isBackground) {
-        // Clean up the command arguments for ProcessBuilder
-        // If it's a background job, ProcessBuilder shouldn't try to pass '&' as a literal argument to the binary,
-        // so we strip it out *only* for the execution array, but keep it for our saved command string.
+        // Strip the '&' only for execution, keep it for the recorded command string
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
         String[] tokens = execCommand.split("\\s+");
 
         try {
             ProcessBuilder pb = new ProcessBuilder(tokens);
-            // Inherit I/O so things like standard output work, 
-            // but for background processes, you typically don't want them blocking on stdin.
             pb.inheritIO(); 
 
             Process process = pb.start();
 
             if (isBackground) {
-                // Get the real process handle ID (Available in Java 9+)
                 long pid = process.toHandle().pid();
                 
-                // Track this as job #1 for this stage
+                // Track this as job #1
                 activeJob = new BackgroundJob(1, pid, fullCommand);
                 
-                // Print standard shell background confirmation line: [job_id] pid
+                // Print the standard initial background confirmation line: [job_id] pid
                 System.out.printf("[%d] %d\n", activeJob.id, activeJob.pid);
             } else {
-                // Foreground process: wait for it to complete normally
+                // Foreground process: wait for it to complete
                 process.waitFor();
             }
 
