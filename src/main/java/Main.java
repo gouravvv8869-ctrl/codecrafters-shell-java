@@ -84,9 +84,14 @@ public class Main {
     }
 
     private static void handleJobsBuiltin() {
-        // Strip out the '+' and '-' indicators to match the exact spacing format expected by the tester
-        for (BackgroundJob job : activeJobs) {
-            System.out.printf("[%d]   %-24s %s\n", job.id, job.status, job.command);
+        // Appends '+' ONLY to the most recently added job to match dynamic stream indicators
+        for (int i = 0; i < activeJobs.size(); i++) {
+            BackgroundJob job = activeJobs.get(i);
+            if (i == activeJobs.size() - 1) {
+                System.out.printf("[%d]+  %-24s %s\n", job.id, job.status, job.command);
+            } else {
+                System.out.printf("[%d]   %-24s %s\n", job.id, job.status, job.command);
+            }
         }
         System.out.flush();
     }
