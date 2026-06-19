@@ -1,5 +1,6 @@
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
@@ -53,19 +54,17 @@ public class Main {
                 String output = message.toString() + "\n";
 
                 if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, output);
+                    writeToFile(parsed.outputFile, output, parsed.appendOutput);
                 } else {
                     System.out.print(output);
                 }
 
-                // Always create/truncate error file if 2> is used (even if empty)
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "");
+                    writeToFile(parsed.errorFile, "", false);
                 }
-
             } else if (command.equals("type")) {
                 if (parsed.args.isEmpty()) {
-                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "");
+                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "", false);
                     continue;
                 }
                 String arg = parsed.args.get(0);
@@ -81,39 +80,39 @@ public class Main {
                     }
                 }
                 if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, result);
+                    writeToFile(parsed.outputFile, result, parsed.appendOutput);
                 } else {
                     System.out.print(result);
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "");
+                    writeToFile(parsed.errorFile, "", false);
                 }
             } else if (command.equals("pwd")) {
                 String output = System.getProperty("user.dir") + "\n";
                 if (parsed.outputFile != null) {
-                    writeToFile(parsed.outputFile, output);
+                    writeToFile(parsed.outputFile, output, parsed.appendOutput);
                 } else {
                     System.out.print(output);
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "");
+                    writeToFile(parsed.errorFile, "", false);
                 }
             } else if (command.equals("cd")) {
                 if (!parsed.args.isEmpty()) {
                     changeDirectory(parsed.args.get(0));
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "");
+                    writeToFile(parsed.errorFile, "", false);
                 }
             } else {
                 // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
-                    runExternalProgram(command, parsed.args, parsed.outputFile, parsed.errorFile);
+                    runExternalProgram(command, parsed.args, parsed.outputFile, parsed.appendOutput, parsed.errorFile);
                 } else {
                     System.out.println(command + ": command not found");
                     if (parsed.errorFile != null) {
-                        writeToFile(parsed.errorFile, "");
+                        writeToFile(parsed.errorFile, "", false);
                     }
                 }
             }
@@ -123,8 +122,9 @@ public class Main {
     private static class ParseResult {
         String command;
         List<String> args = new ArrayList<>();
-        String outputFile = null;   // for > and 1>
-        String errorFile = null;    // for 2>
+        String outputFile = null;
+        boolean appendOutput = false;   // true for >> or 1>>
+        String errorFile = null;        // for 2>
     }
 
     private static ParseResult parseCommand(String[] parts) {
@@ -138,6 +138,14 @@ public class Main {
         while (i < parts.length) {
             String token = parts[i];
             if (token.equals(">") || token.equals("1>")) {
+                result.appendOutput = false;
+                i++;
+                if (i < parts.length) {
+                    result.outputFile = parts[i];
+                    i++;
+                }
+            } else if (token.equals(">>") || token.equals("1>>")) {
+                result.appendOutput = true;
                 i++;
                 if (i < parts.length) {
                     result.outputFile = parts[i];
@@ -220,15 +228,16 @@ public class Main {
         return tokens.toArray(new String[0]);
     }
 
-    private static void writeToFile(String filename, String content) {
-        try (PrintStream ps = new PrintStream(filename)) {
+    private static void writeToFile(String filename, String content, boolean append) {
+        try (PrintStream ps = new PrintStream(new FileOutputStream(filename, append))) {
             ps.print(content);
         } catch (IOException e) {
             System.err.println("Error writing to file: " + e.getMessage());
         }
     }
 
-    private static void runExternalProgram(String command, List<String> args, String outputFile, String errorFile) {
+    private static void runExternalProgram(String command, List<String> args, 
+                                           String outputFile, boolean appendOutput, String errorFile) {
         try {
             List<String> commandList = new ArrayList<>();
             commandList.add(command);
@@ -238,7 +247,9 @@ public class Main {
             builder.directory(new File(System.getProperty("user.dir")));
 
             if (outputFile != null) {
-                builder.redirectOutput(new File(outputFile));
+                builder.redirectOutput(appendOutput 
+                    ? ProcessBuilder.Redirect.appendTo(new File(outputFile))
+                    : ProcessBuilder.Redirect.to(new File(outputFile)));
             } else {
                 builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             }
