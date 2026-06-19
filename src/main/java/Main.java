@@ -60,11 +60,11 @@ public class Main {
                 }
 
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", false);
+                    writeToFile(parsed.errorFile, "", parsed.appendError);
                 }
             } else if (command.equals("type")) {
                 if (parsed.args.isEmpty()) {
-                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "", false);
+                    if (parsed.errorFile != null) writeToFile(parsed.errorFile, "", parsed.appendError);
                     continue;
                 }
                 String arg = parsed.args.get(0);
@@ -85,7 +85,7 @@ public class Main {
                     System.out.print(result);
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", false);
+                    writeToFile(parsed.errorFile, "", parsed.appendError);
                 }
             } else if (command.equals("pwd")) {
                 String output = System.getProperty("user.dir") + "\n";
@@ -95,24 +95,25 @@ public class Main {
                     System.out.print(output);
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", false);
+                    writeToFile(parsed.errorFile, "", parsed.appendError);
                 }
             } else if (command.equals("cd")) {
                 if (!parsed.args.isEmpty()) {
                     changeDirectory(parsed.args.get(0));
                 }
                 if (parsed.errorFile != null) {
-                    writeToFile(parsed.errorFile, "", false);
+                    writeToFile(parsed.errorFile, "", parsed.appendError);
                 }
             } else {
                 // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
-                    runExternalProgram(command, parsed.args, parsed.outputFile, parsed.appendOutput, parsed.errorFile);
+                    runExternalProgram(command, parsed.args, parsed.outputFile, parsed.appendOutput, 
+                                     parsed.errorFile, parsed.appendError);
                 } else {
                     System.out.println(command + ": command not found");
                     if (parsed.errorFile != null) {
-                        writeToFile(parsed.errorFile, "", false);
+                        writeToFile(parsed.errorFile, "", parsed.appendError);
                     }
                 }
             }
@@ -123,8 +124,9 @@ public class Main {
         String command;
         List<String> args = new ArrayList<>();
         String outputFile = null;
-        boolean appendOutput = false;   // true for >> or 1>>
-        String errorFile = null;        // for 2>
+        boolean appendOutput = false;
+        String errorFile = null;
+        boolean appendError = false;     // New: for 2>>
     }
 
     private static ParseResult parseCommand(String[] parts) {
@@ -152,6 +154,14 @@ public class Main {
                     i++;
                 }
             } else if (token.equals("2>")) {
+                result.appendError = false;
+                i++;
+                if (i < parts.length) {
+                    result.errorFile = parts[i];
+                    i++;
+                }
+            } else if (token.equals("2>>")) {
+                result.appendError = true;
                 i++;
                 if (i < parts.length) {
                     result.errorFile = parts[i];
@@ -237,7 +247,8 @@ public class Main {
     }
 
     private static void runExternalProgram(String command, List<String> args, 
-                                           String outputFile, boolean appendOutput, String errorFile) {
+                                           String outputFile, boolean appendOutput, 
+                                           String errorFile, boolean appendError) {
         try {
             List<String> commandList = new ArrayList<>();
             commandList.add(command);
@@ -255,7 +266,9 @@ public class Main {
             }
 
             if (errorFile != null) {
-                builder.redirectError(new File(errorFile));
+                builder.redirectError(appendError 
+                    ? ProcessBuilder.Redirect.appendTo(new File(errorFile))
+                    : ProcessBuilder.Redirect.to(new File(errorFile)));
             } else {
                 builder.redirectError(ProcessBuilder.Redirect.INHERIT);
             }
