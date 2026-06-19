@@ -1,20 +1,22 @@
-const readline = require("readline");
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
-function prompt() {
-  rl.question("$ ", (answer) => {
-    if (answer.startsWith("echo ")) {
-      const args = answer.slice("echo ".length);
-      console.log(args);
-    } else {
-      console.log(`${answer}: command not found`);
+        while (true) {
+            System.out.print("$ ");
+            String input = reader.readLine();
+            if (input == null) break;
+
+            if (input.startsWith("echo ")) {
+                String message = input.substring(5);
+                System.out.println(message);
+            } else {
+                System.out.println(input + ": command not found");
+            }
+        }
     }
-    prompt();
-  });
 }
-
-prompt();
