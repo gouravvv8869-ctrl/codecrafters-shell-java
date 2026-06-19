@@ -81,9 +81,10 @@ public class Main {
                     changeDirectory(parsed.args.get(0));
                 }
             } else {
+                // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
-                    runExternalProgram(command, parsed.args, parsed.outputFile);
+                    runExternalProgram(command, parsed.args, parsed.outputFile, parsed.errorFile);
                 } else {
                     System.out.println(command + ": command not found");
                 }
@@ -94,7 +95,8 @@ public class Main {
     private static class ParseResult {
         String command;
         List<String> args = new ArrayList<>();
-        String outputFile = null;
+        String outputFile = null;   // for > and 1>
+        String errorFile = null;    // for 2>
     }
 
     private static ParseResult parseCommand(String[] parts) {
@@ -113,7 +115,12 @@ public class Main {
                     result.outputFile = parts[i];
                     i++;
                 }
-                break; // Only one redirection for now
+            } else if (token.equals("2>")) {
+                i++;
+                if (i < parts.length) {
+                    result.errorFile = parts[i];
+                    i++;
+                }
             } else {
                 result.args.add(token);
                 i++;
@@ -193,7 +200,7 @@ public class Main {
         }
     }
 
-    private static void runExternalProgram(String command, List<String> args, String outputFile) {
+    private static void runExternalProgram(String command, List<String> args, String outputFile, String errorFile) {
         try {
             List<String> commandList = new ArrayList<>();
             commandList.add(command);
@@ -204,9 +211,21 @@ public class Main {
 
             if (outputFile != null) {
                 builder.redirectOutput(new File(outputFile));
-                builder.redirectError(ProcessBuilder.Redirect.INHERIT);  // ← Important fix
-            } else {
+            }
+            if (errorFile != null) {
+                builder.redirectError(new File(errorFile));
+            }
+
+            // Inherit the streams that are not redirected
+            if (outputFile == null && errorFile == null) {
                 builder.inheritIO();
+            } else {
+                if (outputFile == null) {
+                    builder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                }
+                if (errorFile == null) {
+                    builder.redirectError(ProcessBuilder.Redirect.INHERIT);
+                }
             }
 
             Process process = builder.start();
