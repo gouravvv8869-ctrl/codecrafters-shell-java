@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd");
 
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -53,6 +53,8 @@ public class Main {
                         System.out.println(arg + ": not found");
                     }
                 }
+            } else if (command.equals("pwd")) {
+                System.out.println(System.getProperty("user.dir"));
             } else {
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
