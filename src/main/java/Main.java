@@ -29,6 +29,7 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
+            // Automatic reaping point before showing the prompt
             reapAndPrintCompletedJobsOnly();
 
             System.out.print("$ ");
@@ -82,7 +83,6 @@ public class Main {
                 commandToRun = input; 
             }
 
-            // Check if this execution path includes a pipeline operator
             if (rawTokens.contains("|")) {
                 executePipeline(rawTokens, isBackground, input);
             } else {
@@ -92,20 +92,27 @@ public class Main {
         scanner.close();
     }
 
+    /**
+     * Automatic prompt reaper: Checks statuses, prints ONLY completed ("Done") jobs,
+     * and clears them from active tracking.
+     */
     private static void reapAndPrintCompletedJobsOnly() {
         int totalJobs = activeJobs.size();
         List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
+        // Refresh process states
         for (BackgroundJob job : activeJobs) {
             if (job.status.equals("Running") && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
 
+        // Output only what finished
         for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
             if (job.status.equals("Done")) {
                 String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
+
                 String cleanCmd = job.command;
                 if (cleanCmd.endsWith("&")) {
                     cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
@@ -115,26 +122,48 @@ public class Main {
             }
         }
         System.out.flush();
+
         activeJobs.removeAll(jobsToRemove);
     }
 
+    /**
+     * Builtin 'jobs' handler: Refreshes execution states, prints EVERYTHING sequentially
+     * in original ID order, and clears out the finished ones afterward.
+     */
     private static void handleJobsBuiltin() {
-        reapAndPrintCompletedJobsOnly();
+        int totalJobs = activeJobs.size();
+        List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        int remainingTotal = activeJobs.size();
-        for (int i = 0; i < remainingTotal; i++) {
+        // 1. Refresh states first without printing anything yet
+        for (BackgroundJob job : activeJobs) {
+            if (job.status.equals("Running") && !job.process.isAlive()) {
+                job.status = "Done";
+            }
+        }
+
+        // 2. Print everything sequentially in index order (1, 2, 3...)
+        for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
-            String symbol = (i == remainingTotal - 1) ? "+" : (i == remainingTotal - 2) ? "-" : " ";
-            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
+
+            if (job.status.equals("Done")) {
+                String cleanCmd = job.command;
+                if (cleanCmd.endsWith("&")) {
+                    cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
+                }
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
+                jobsToRemove.add(job);
+            } else {
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            }
         }
         System.out.flush();
+
+        // 3. Clean up the reaped entries after the full table has been printed
+        activeJobs.removeAll(jobsToRemove);
     }
 
-    /**
-     * Executes pipelines natively using ProcessBuilder.startPipeline API.
-     */
     private static void executePipeline(List<String> rawTokens, boolean isBackground, String rawInput) {
-        // Drop tracking of the background token suffix from token arrays if present
         List<String> tokens = new ArrayList<>(rawTokens);
         if (isBackground && !tokens.isEmpty() && tokens.get(tokens.size() - 1).equals("&")) {
             tokens.remove(tokens.size() - 1);
@@ -144,7 +173,6 @@ public class Main {
         List<String> cmd1Tokens = new ArrayList<>(tokens.subList(0, pipeIndex));
         List<String> cmd2Tokens = new ArrayList<>(tokens.subList(pipeIndex + 1, tokens.size()));
 
-        // Extract file redirections for command 1
         List<String> cleanCmd1 = new ArrayList<>();
         String leftStdinFile = null;
         for (int i = 0; i < cmd1Tokens.size(); i++) {
@@ -157,7 +185,6 @@ public class Main {
             }
         }
 
-        // Extract file redirections for command 2
         List<String> cleanCmd2 = new ArrayList<>();
         String rightStdoutFile = null;
         boolean appendStdout = false;
@@ -180,7 +207,6 @@ public class Main {
             ProcessBuilder pb1 = new ProcessBuilder(cleanCmd1).directory(currentWorkingDirectory);
             ProcessBuilder pb2 = new ProcessBuilder(cleanCmd2).directory(currentWorkingDirectory);
 
-            // Left Command inputs
             if (leftStdinFile != null) {
                 File file = new File(leftStdinFile);
                 if (!file.isAbsolute()) file = new File(currentWorkingDirectory, leftStdinFile);
@@ -190,7 +216,6 @@ public class Main {
             }
             pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
 
-            // Right Command outputs
             if (rightStdoutFile != null) {
                 File file = new File(rightStdoutFile);
                 if (!file.isAbsolute()) file = new File(currentWorkingDirectory, rightStdoutFile);
@@ -201,7 +226,6 @@ public class Main {
             }
             pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
 
-            // Link processes together across standard streams automatically
             List<Process> pipeline = ProcessBuilder.startPipeline(List.of(pb1, pb2));
             Process finalProcess = pipeline.get(pipeline.size() - 1);
 
@@ -221,7 +245,6 @@ public class Main {
                 System.out.printf("[%d] %d\n", newJob.id, newJob.pid);
                 System.out.flush();
             } else {
-                // Foreground pipeline blocks until the final trailing process finishes writing execution streams
                 finalProcess.waitFor();
             }
 
