@@ -29,8 +29,8 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
-            // --- Point 1: Automatic Reaping before the prompt is printed ---
-            reapAndPrintCompletedJobs();
+            // Automatic reaping point before showing the prompt (prints ONLY completed jobs)
+            reapAndPrintCompletedJobsOnly();
 
             System.out.print("$ ");
             System.out.flush(); 
@@ -89,24 +89,23 @@ public class Main {
     }
 
     /**
-     * Reuses the core engine to look through current jobs, update dead ones to 'Done',
-     * print them using dynamic marker positions, and flush them cleanly from memory.
+     * Automatic prompt reaper: Checks statuses, prints ONLY completed ("Done") jobs,
+     * and clears them from active tracking.
      */
-    private static void reapAndPrintCompletedJobs() {
+    private static void reapAndPrintCompletedJobsOnly() {
         int totalJobs = activeJobs.size();
         List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        // Check and mark dead processes first
+        // Refresh process states
         for (BackgroundJob job : activeJobs) {
             if (job.status.equals("Running") && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
 
-        // Render ONLY the 'Done' ones if calling from the general prompt point
+        // Output only what finished
         for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
-            
             if (job.status.equals("Done")) {
                 String symbol;
                 if (i == totalJobs - 1) {
@@ -127,32 +126,52 @@ public class Main {
         }
         System.out.flush();
 
-        // Clear reaped items out of active table completely
         activeJobs.removeAll(jobsToRemove);
     }
 
-    // --- Point 2: Custom Handling Inside the Jobs Builtin ---
+    /**
+     * Builtin 'jobs' handler: Refreshes execution states, prints EVERYTHING sequentially
+     * in original ID order, and clears out the finished ones afterward.
+     */
     private static void handleJobsBuiltin() {
-        // Run reaping check first to print any newly completed jobs
-        reapAndPrintCompletedJobs();
+        int totalJobs = activeJobs.size();
+        List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        // Now print the remaining active running jobs with freshly shifted markers
-        int remainingTotal = activeJobs.size();
-        for (int i = 0; i < remainingTotal; i++) {
+        // 1. Refresh states first
+        for (BackgroundJob job : activeJobs) {
+            if (job.status.equals("Running") && !job.process.isAlive()) {
+                job.status = "Done";
+            }
+        }
+
+        // 2. Print everything sequentially in index order
+        for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
             String symbol;
             
-            if (i == remainingTotal - 1) {
+            if (i == totalJobs - 1) {
                 symbol = "+";
-            } else if (i == remainingTotal - 2) {
+            } else if (i == totalJobs - 2) {
                 symbol = "-";
             } else {
                 symbol = " ";
             }
 
-            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            if (job.status.equals("Done")) {
+                String cleanCmd = job.command;
+                if (cleanCmd.endsWith("&")) {
+                    cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
+                }
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
+                jobsToRemove.add(job);
+            } else {
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            }
         }
         System.out.flush();
+
+        // 3. Clean up the reaped entries
+        activeJobs.removeAll(jobsToRemove);
     }
 
     private static void handleTypeBuiltin(List<String> tokens) {
