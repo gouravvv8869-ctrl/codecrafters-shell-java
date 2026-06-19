@@ -32,7 +32,6 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
-            // Automatic reaping point before showing the prompt (prints ONLY completed jobs)
             reapAndPrintCompletedJobsOnly();
 
             System.out.print("$ ");
@@ -87,7 +86,7 @@ public class Main {
             }
 
             if (rawTokens.contains("|")) {
-                executePipeline(rawTokens, isBackground, input);
+                executeMultiStagePipeline(rawTokens, isBackground, input);
             } else {
                 executeCommand(commandToRun, isBackground);
             }
@@ -95,22 +94,16 @@ public class Main {
         scanner.close();
     }
 
-    /**
-     * Automatic prompt reaper: Checks statuses, prints ONLY completed ("Done") jobs,
-     * and clears them from active tracking.
-     */
     private static void reapAndPrintCompletedJobsOnly() {
         int totalJobs = activeJobs.size();
         List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        // Refresh process states
         for (BackgroundJob job : activeJobs) {
             if (job.status.equals("Running") && !job.process.isAlive()) {
                 job.status = "Done";
             }
         }
 
-        // Output only what finished
         for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
             if (job.status.equals("Done")) {
@@ -124,159 +117,146 @@ public class Main {
             }
         }
         System.out.flush();
-
         activeJobs.removeAll(jobsToRemove);
     }
 
-    /**
-     * Builtin 'jobs' handler: Refreshes execution states, prints EVERYTHING sequentially
-     * in original ID order, and clears out the finished ones afterward.
-     */
     private static void handleJobsBuiltin() {
-        int totalJobs = activeJobs.size();
-        List<BackgroundJob> jobsToRemove = new ArrayList<>();
+        reapAndPrintCompletedJobsOnly();
 
-        // 1. Refresh states first without printing anything yet
-        for (BackgroundJob job : activeJobs) {
-            if (job.status.equals("Running") && !job.process.isAlive()) {
-                job.status = "Done";
-            }
-        }
-
-        // 2. Print everything sequentially in index order (1, 2, 3...)
-        for (int i = 0; i < totalJobs; i++) {
+        int remainingTotal = activeJobs.size();
+        for (int i = 0; i < remainingTotal; i++) {
             BackgroundJob job = activeJobs.get(i);
-            String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
-
-            if (job.status.equals("Done")) {
-                String cleanCmd = job.command;
-                if (cleanCmd.endsWith("&")) {
-                    cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
-                }
-                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
-                jobsToRemove.add(job);
-            } else {
-                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
-            }
+            String symbol = (i == remainingTotal - 1) ? "+" : (i == remainingTotal - 2) ? "-" : " ";
+            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
         }
         System.out.flush();
-
-        // 3. Clean up the reaped entries after the full table has been printed
-        activeJobs.removeAll(jobsToRemove);
     }
 
     private static boolean isBuiltIn(String cmd) {
         return cmd.equals("echo") || cmd.equals("type") || cmd.equals("cd") || cmd.equals("pwd") || cmd.equals("jobs") || cmd.equals("exit");
     }
 
-    private static void executePipeline(List<String> rawTokens, boolean isBackground, String rawInput) {
+    /**
+     * Executes arbitrary-stage pipelines natively using ProcessBuilder.startPipeline.
+     * Built-ins are seamlessly caught and piped if encountered at the stream boundaries.
+     */
+    private static void executeMultiStagePipeline(List<String> rawTokens, boolean isBackground, String rawInput) {
         List<String> tokens = new ArrayList<>(rawTokens);
         if (isBackground && !tokens.isEmpty() && tokens.get(tokens.size() - 1).equals("&")) {
             tokens.remove(tokens.size() - 1);
         }
 
-        int pipeIndex = tokens.indexOf("|");
-        List<String> cmd1Tokens = new ArrayList<>(tokens.subList(0, pipeIndex));
-        List<String> cmd2Tokens = new ArrayList<>(tokens.subList(pipeIndex + 1, tokens.size()));
-
-        String firstCmd = cmd1Tokens.isEmpty() ? "" : cmd1Tokens.get(0);
-        String secondCmd = cmd2Tokens.isEmpty() ? "" : cmd2Tokens.get(0);
-
-        // Case 1: Left command is a Builtin
-        if (isBuiltIn(firstCmd)) {
-            try {
-                ProcessBuilder pb2 = new ProcessBuilder(cmd2Tokens).directory(currentWorkingDirectory);
-                pb2.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
-                pb2.redirectInput(ProcessBuilder.Redirect.PIPE);
-
-                Process p2 = pb2.start();
-
-                try (PrintStream outStream = new PrintStream(p2.getOutputStream())) {
-                    PrintStream originalOut = System.out;
-                    System.setOut(outStream);
-                    
-                    if (firstCmd.equals("echo")) {
-                        handleEchoExecution(cmd1Tokens);
-                    } else if (firstCmd.equals("pwd")) {
-                        System.out.println(currentWorkingDirectory.getAbsolutePath());
-                    } else if (firstCmd.equals("type")) {
-                        handleTypeBuiltin(cmd1Tokens);
-                    }
-                    
-                    System.setOut(originalOut);
+        // Split tokens across arbitrary number of pipe symbols "|"
+        List<List<String>> commandsTokensList = new ArrayList<>();
+        List<String> currentCmdTokens = new ArrayList<>();
+        for (String token : tokens) {
+            if (token.equals("|")) {
+                if (!currentCmdTokens.isEmpty()) {
+                    commandsTokensList.add(currentCmdTokens);
+                    currentCmdTokens = new ArrayList<>();
                 }
-
-                if (!isBackground) {
-                    p2.waitFor();
-                } else {
-                    trackBackgroundJob(p2, rawInput);
-                }
-            } catch (Exception e) {
-                System.out.println("Pipeline error");
+            } else {
+                currentCmdTokens.add(token);
             }
+        }
+        if (!currentCmdTokens.isEmpty()) {
+            commandsTokensList.add(currentCmdTokens);
+        }
+
+        if (commandsTokensList.isEmpty()) return;
+
+        // Fallback optimized single built-in boundary handling logic
+        String firstCmdName = commandsTokensList.get(0).get(0);
+        if (commandsTokensList.size() == 2 && isBuiltIn(firstCmdName)) {
+            executeTwoStageBuiltInLeft(commandsTokensList.get(0), commandsTokensList.get(1), isBackground, rawInput);
+            return;
+        }
+        String lastCmdName = commandsTokensList.get(commandsTokensList.size() - 1).get(0);
+        if (commandsTokensList.size() == 2 && isBuiltIn(lastCmdName)) {
+            executeTwoStageBuiltInRight(commandsTokensList.get(0), commandsTokensList.get(1), isBackground);
             return;
         }
 
-        // Case 2: Right command is a Builtin
-        if (isBuiltIn(secondCmd)) {
-            try {
-                ProcessBuilder pb1 = new ProcessBuilder(cmd1Tokens).directory(currentWorkingDirectory);
-                pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
-                pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
-                pb1.redirectOutput(ProcessBuilder.Redirect.PIPE);
-
-                Process p1 = pb1.start();
-
-                Thread streamDrainer = new Thread(() -> {
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(p1.getInputStream()))) {
-                        while (reader.readLine() != null) {
-                            // Clear OS pipeline stream buffer
-                        }
-                    } catch (IOException e) {
-                        // Channel closed
-                    }
-                });
-                streamDrainer.start();
-
-                if (secondCmd.equals("type")) {
-                    handleTypeBuiltin(cmd2Tokens);
-                } else if (secondCmd.equals("echo")) {
-                    handleEchoExecution(cmd2Tokens);
-                } else if (secondCmd.equals("pwd")) {
-                    System.out.println(currentWorkingDirectory.getAbsolutePath());
-                }
-
-                if (!isBackground) {
-                    p1.waitFor();
-                    streamDrainer.join();
-                }
-            } catch (Exception e) {
-                System.out.println("Pipeline error");
-            }
-            return;
+        // Standard dynamic process construction flow
+        List<ProcessBuilder> builders = new ArrayList<>();
+        for (List<String> cmdTokens : commandsTokensList) {
+            ProcessBuilder pb = new ProcessBuilder(cmdTokens).directory(currentWorkingDirectory);
+            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            builders.add(pb);
         }
 
-        // Case 3: Standard External Pipeline
         try {
-            ProcessBuilder pb1 = new ProcessBuilder(cmd1Tokens).directory(currentWorkingDirectory);
-            ProcessBuilder pb2 = new ProcessBuilder(cmd2Tokens).directory(currentWorkingDirectory);
-
-            pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
-            pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
-            pb2.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-            pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-            List<Process> pipeline = ProcessBuilder.startPipeline(List.of(pb1, pb2));
-            Process finalProcess = pipeline.get(pipeline.size() - 1);
+            // Fork and wire standard stream pipes across N-processes sequentially
+            List<Process> pipelineProcesses = ProcessBuilder.startPipeline(builders);
+            Process finalProcess = pipelineProcesses.get(pipelineProcesses.size() - 1);
 
             if (isBackground) {
                 trackBackgroundJob(finalProcess, rawInput);
             } else {
+                // Blocking foreground waits until the trailing command terminates standard execution
                 finalProcess.waitFor();
             }
         } catch (IOException | InterruptedException e) {
-            System.out.println("Pipeline failed");
+            System.out.println("Pipeline execution failed");
+            System.out.flush();
+        }
+    }
+
+    private static void executeTwoStageBuiltInLeft(List<String> cmd1, List<String> cmd2, boolean isBg, String rawInput) {
+        try {
+            ProcessBuilder pb2 = new ProcessBuilder(cmd2).directory(currentWorkingDirectory);
+            pb2.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            pb2.redirectError(ProcessBuilder.Redirect.INHERIT);
+            pb2.redirectInput(ProcessBuilder.Redirect.PIPE);
+
+            Process p2 = pb2.start();
+            String firstCmd = cmd1.get(0);
+
+            try (PrintStream outStream = new PrintStream(p2.getOutputStream())) {
+                PrintStream originalOut = System.out;
+                System.setOut(outStream);
+                if (firstCmd.equals("echo")) handleEchoExecution(cmd1);
+                else if (firstCmd.equals("pwd")) System.out.println(currentWorkingDirectory.getAbsolutePath());
+                else if (firstCmd.equals("type")) handleTypeBuiltin(cmd1);
+                System.setOut(originalOut);
+            }
+
+            if (!isBg) p2.waitFor();
+            else trackBackgroundJob(p2, rawInput);
+        } catch (Exception e) {
+            System.out.println("Pipeline error");
+        }
+    }
+
+    private static void executeTwoStageBuiltInRight(List<String> cmd1, List<String> cmd2, boolean isBg) {
+        try {
+            ProcessBuilder pb1 = new ProcessBuilder(cmd1).directory(currentWorkingDirectory);
+            pb1.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            pb1.redirectError(ProcessBuilder.Redirect.INHERIT);
+            pb1.redirectOutput(ProcessBuilder.Redirect.PIPE);
+
+            Process p1 = pb1.start();
+            String secondCmd = cmd2.get(0);
+
+            Thread streamDrainer = new Thread(() -> {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(p1.getInputStream()))) {
+                    while (reader.readLine() != null) {}
+                } catch (IOException e) {}
+            });
+            streamDrainer.start();
+
+            if (secondCmd.equals("type")) handleTypeBuiltin(cmd2);
+            else if (secondCmd.equals("echo")) handleEchoExecution(cmd2);
+            else if (secondCmd.equals("pwd")) System.out.println(currentWorkingDirectory.getAbsolutePath());
+
+            if (!isBg) {
+                p1.waitFor();
+                streamDrainer.join();
+            }
+        } catch (Exception e) {
+            System.out.println("Pipeline error");
         }
     }
 
