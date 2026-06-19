@@ -88,22 +88,34 @@ public class Main {
     }
 
     private static void executeCommand(String fullCommand, boolean isBackground) {
-        // Strip trailing '&' for parsing execution arguments if background job
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
         String[] rawTokens = execCommand.split("\\s+");
 
         List<String> commandTokens = new ArrayList<>();
-        String errorRedirectFile = null;
-        boolean appendError = false;
+        
+        String stdoutRedirectFile = null;
+        String stderrRedirectFile = null;
+        boolean appendStdout = false;
+        boolean appendStderr = false;
 
-        // Parse tokens to detect stderr append redirection (>> or 2>>)
-        // Note: In typical shells, standard output append is >>, but the stage specifically tests appending stderr.
-        // We'll support both basic '>>' and explicit '2>>' for stderr append mapping based on the tester's test-case.
+        // Parse tokens accurately based on standard stream rules
         for (int i = 0; i < rawTokens.length; i++) {
-            if ((rawTokens[i].equals(">>") || rawTokens[i].equals("2>>")) && i + 1 < rawTokens.length) {
-                errorRedirectFile = rawTokens[i + 1];
-                appendError = true;
-                i++; // Skip the filename token since we consumed it
+            if (rawTokens[i].equals(">") && i + 1 < rawTokens.length) {
+                stdoutRedirectFile = rawTokens[i + 1];
+                appendStdout = false;
+                i++;
+            } else if ((rawTokens[i].equals(">>") || rawTokens[i].equals("1>>")) && i + 1 < rawTokens.length) {
+                stdoutRedirectFile = rawTokens[i + 1];
+                appendStdout = true;
+                i++;
+            } else if (rawTokens[i].equals("2>") && i + 1 < rawTokens.length) {
+                stderrRedirectFile = rawTokens[i + 1];
+                appendStderr = false;
+                i++;
+            } else if (rawTokens[i].equals("2>>")) {
+                stderrRedirectFile = rawTokens[i + 1];
+                appendStderr = true;
+                i++;
             } else {
                 commandTokens.add(rawTokens[i]);
             }
@@ -116,23 +128,27 @@ public class Main {
         try {
             ProcessBuilder pb = new ProcessBuilder(commandTokens);
             
-            // Handle output redirection setup
-            if (errorRedirectFile != null) {
-                File file = new File(errorRedirectFile);
+            // Handle standard output redirection
+            if (stdoutRedirectFile != null) {
+                File file = new File(stdoutRedirectFile);
+                if (file.getParentFile() != null) file.getParentFile().mkdirs();
                 
-                // Ensure parent directories exist if needed (helps pass robust environments)
-                if (file.getParentFile() != null) {
-                    file.getParentFile().mkdirs();
-                }
-
-                // Redirect stderr to append to the file
-                pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
-                // Keep standard output tied to console unless requested otherwise
-                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                pb.redirectOutput(appendStdout ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
             } else {
-                pb.inheritIO();
+                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             }
+
+            // Handle standard error redirection
+            if (stderrRedirectFile != null) {
+                File file = new File(stderrRedirectFile);
+                if (file.getParentFile() != null) file.getParentFile().mkdirs();
+                
+                pb.redirectError(appendStderr ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
+            } else {
+                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+            }
+
+            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
 
             Process process = pb.start();
 
