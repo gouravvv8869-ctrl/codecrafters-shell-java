@@ -20,7 +20,8 @@ public class Main {
         }
     }
 
-    private static BackgroundJob activeJob = null;
+    // Dynamic list to track multiple background processes simultaneously
+    private static List<BackgroundJob> activeJobs = new ArrayList<>();
     private static File currentWorkingDirectory = new File(System.getProperty("user.dir"));
 
     public static void main(String[] args) {
@@ -65,7 +66,6 @@ public class Main {
                 continue;
             }
 
-            // --- Handle 'pwd' Builtin ---
             if (command.equals("pwd")) {
                 System.out.println(currentWorkingDirectory.getAbsolutePath());
                 System.out.flush();
@@ -85,10 +85,14 @@ public class Main {
     }
 
     private static void handleJobsBuiltin() {
-        if (activeJob != null) {
-            System.out.printf("[%d]+  %-24s %s\n", activeJob.id, activeJob.status, activeJob.command);
-            System.out.flush();
+        // Render all tracked running background jobs in the order they were executed
+        for (int i = 0; i < activeJobs.size(); i++) {
+            BackgroundJob job = activeJobs.get(i);
+            // The '+' suffix matches standard shell tracking behavior for the current/last job
+            String suffix = (i == activeJobs.size() - 1) ? "+" : "-";
+            System.out.printf("[%d]%s  %-24s %s\n", job.id, suffix, job.status, job.command);
         }
+        System.out.flush();
     }
 
     private static void handleTypeBuiltin(List<String> tokens) {
@@ -99,7 +103,6 @@ public class Main {
         }
         String target = tokens.get(1);
         
-        // Added 'pwd' here to mark it explicitly as a shell builtin
         if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs") || target.equals("cd") || target.equals("pwd")) {
             System.out.println(target + " is a shell builtin");
         } else {
@@ -261,8 +264,12 @@ public class Main {
 
             if (isBackground) {
                 long pid = process.toHandle().pid();
-                activeJob = new BackgroundJob(1, pid, fullCommand);
-                System.out.printf("[%d] %d\n", activeJob.id, activeJob.pid);
+                // Assign a unique sequential job ID based on list history tracking count
+                int nextJobId = activeJobs.size() + 1;
+                BackgroundJob newJob = new BackgroundJob(nextJobId, pid, fullCommand);
+                activeJobs.add(newJob);
+                
+                System.out.printf("[%d] %d\n", newJob.id, newJob.pid);
                 System.out.flush();
             } else {
                 process.waitFor();
