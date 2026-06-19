@@ -21,6 +21,9 @@ public class Main {
     }
 
     private static BackgroundJob activeJob = null;
+    
+    // Track the current working directory of our shell
+    private static File currentWorkingDirectory = new File(System.getProperty("user.dir"));
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
@@ -38,17 +41,31 @@ public class Main {
                 continue;
             }
 
-            if (input.equals("exit")) {
+            // Tokenize carefully using our quote-aware parser
+            List<String> rawTokens = parseTokens(input);
+            if (rawTokens.isEmpty()) {
+                continue;
+            }
+
+            String command = rawTokens.get(0);
+
+            if (command.equals("exit")) {
                 break;
             }
 
-            if (input.equals("jobs")) {
+            if (command.equals("jobs")) {
                 handleJobsBuiltin();
                 continue;
             }
 
-            if (input.startsWith("type ")) {
-                handleTypeBuiltin(input);
+            if (command.equals("type")) {
+                handleTypeBuiltin(rawTokens);
+                continue;
+            }
+
+            // --- Handle 'cd' Builtin ---
+            if (command.equals("cd")) {
+                handleCdBuiltin(rawTokens);
                 continue;
             }
 
@@ -71,10 +88,15 @@ public class Main {
         }
     }
 
-    private static void handleTypeBuiltin(String input) {
-        String target = input.substring(5).trim();
+    private static void handleTypeBuiltin(List<String> tokens) {
+        if (tokens.size() < 2) {
+            System.out.println("type: missing operand");
+            System.out.flush();
+            return;
+        }
+        String target = tokens.get(1);
         
-        if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs")) {
+        if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs") || target.equals("cd")) {
             System.out.println(target + " is a shell builtin");
         } else {
             String path = getPath(target);
@@ -87,7 +109,40 @@ public class Main {
         System.out.flush();
     }
 
-    // Modern lexical analyzer to split string into tokens respecting shell quoting rules
+    private static void handleCdBuiltin(List<String> tokens) {
+        String targetPath = (tokens.size() > 1) ? tokens.get(1) : "~";
+
+        File newDir;
+        // Resolve home directory path mapping shortcut
+        if (targetPath.equals("~")) {
+            String homeEnv = System.getenv("HOME");
+            if (homeEnv == null) {
+                homeEnv = System.getProperty("user.home");
+            }
+            newDir = new File(homeEnv);
+        } else {
+            newDir = new File(targetPath);
+            // If it's a relative path, resolve it against our tracked working directory
+            if (!newDir.isAbsolute()) {
+                newDir = new File(currentWorkingDirectory, targetPath);
+            }
+        }
+
+        // Canonicalize path to clean up duplicate dots like '/tmp/../tmp'
+        try {
+            newDir = newDir.getCanonicalFile();
+        } catch (IOException e) {
+            newDir = newDir.getAbsoluteFile();
+        }
+
+        if (newDir.exists() && newDir.isDirectory()) {
+            currentWorkingDirectory = newDir;
+        } else {
+            System.out.println("cd: " + targetPath + ": No such file or directory");
+            System.out.flush();
+        }
+    }
+
     private static List<String> parseTokens(String input) {
         List<String> tokens = new ArrayList<>();
         StringBuilder currentToken = new StringBuilder();
@@ -105,7 +160,6 @@ public class Main {
                 escaped = false;
                 tokenActive = true;
             } else if (c == '\\' && !inSingleQuotes) {
-                // If in double quotes, backslash only escapes specific characters like ", \, $, `
                 if (inDoubleQuotes) {
                     if (i + 1 < input.length() && ("\"\\$`".indexOf(input.charAt(i + 1)) != -1)) {
                         escaped = true;
@@ -118,7 +172,7 @@ public class Main {
                 tokenActive = true;
             } else if (c == '\'' && !inDoubleQuotes) {
                 inSingleQuotes = !inSingleQuotes;
-                tokenActive = true; // Handles empty quotes '' as an empty string argument
+                tokenActive = true;
             } else if (c == '"' && !inSingleQuotes) {
                 inDoubleQuotes = !inDoubleQuotes;
                 tokenActive = true;
@@ -143,8 +197,6 @@ public class Main {
 
     private static void executeCommand(String fullCommand, boolean isBackground) {
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
-        
-        // Use the new quote-aware parser instead of split("\\s+")
         List<String> rawTokens = parseTokens(execCommand);
 
         List<String> commandTokens = new ArrayList<>();
@@ -183,8 +235,12 @@ public class Main {
         try {
             ProcessBuilder pb = new ProcessBuilder(commandTokens);
             
+            // CRITICAL: Force the child process to spawn inside our tracked CWD
+            pb.directory(currentWorkingDirectory);
+
             if (stdoutRedirectFile != null) {
                 File file = new File(stdoutRedirectFile);
+                if (!file.isAbsolute()) file = new File(currentWorkingDirectory, stdoutRedirectFile);
                 if (file.getParentFile() != null) file.getParentFile().mkdirs();
                 pb.redirectOutput(appendStdout ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
             } else {
@@ -193,6 +249,7 @@ public class Main {
 
             if (stderrRedirectFile != null) {
                 File file = new File(stderrRedirectFile);
+                if (!file.isAbsolute()) file = new File(currentWorkingDirectory, stderrRedirectFile);
                 if (file.getParentFile() != null) file.getParentFile().mkdirs();
                 pb.redirectError(appendStderr ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
             } else {
