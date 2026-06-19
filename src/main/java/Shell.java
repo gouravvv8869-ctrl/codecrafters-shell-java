@@ -1,12 +1,11 @@
 import java.io.IOException;
 import java.util.Scanner;
 
-public class Main {
+public class Shell {
 
-    // Simple class to store our single background job's details
     static class BackgroundJob {
         int id;
-        long pid; // Process.pid() returns a long
+        long pid;
         String command;
         String status;
 
@@ -18,7 +17,6 @@ public class Main {
         }
     }
 
-    // Single static reference for this stage's background job
     private static BackgroundJob activeJob = null;
 
     public static void main(String[] args) {
@@ -35,18 +33,20 @@ public class Main {
                 continue;
             }
 
-            // Handle the 'exit' command
             if (input.equals("exit")) {
                 break;
             }
 
-            // Handle the 'jobs' builtin command
             if (input.equals("jobs")) {
                 handleJobsBuiltin();
                 continue;
             }
 
-            // Check if this is a background command
+            if (input.startsWith("type ")) {
+                handleTypeBuiltin(input);
+                continue;
+            }
+
             boolean isBackground = false;
             String commandToRun = input;
             if (input.endsWith("&")) {
@@ -61,13 +61,26 @@ public class Main {
 
     private static void handleJobsBuiltin() {
         if (activeJob != null) {
-            // %-24s left-aligns the status and pads it with spaces to exactly 24 characters
             System.out.printf("[%d]+  %-24s %s\n", activeJob.id, activeJob.status, activeJob.command);
         }
     }
 
+    private static void handleTypeBuiltin(String input) {
+        String target = input.substring(5).trim();
+        
+        if (target.equals("exit") || target.equals("echo") || target.equals("type") || target.equals("jobs")) {
+            System.out.println(target + " is a shell builtin");
+        } else {
+            String path = getPath(target);
+            if (path != null) {
+                System.out.println(target + " is " + path);
+            } else {
+                System.out.println(target + ": not found");
+            }
+        }
+    }
+
     private static void executeCommand(String fullCommand, boolean isBackground) {
-        // Strip the '&' only for execution, keep it for the recorded command string
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
         String[] tokens = execCommand.split("\\s+");
 
@@ -79,19 +92,28 @@ public class Main {
 
             if (isBackground) {
                 long pid = process.toHandle().pid();
-                
-                // Track this as job #1
                 activeJob = new BackgroundJob(1, pid, fullCommand);
-                
-                // Print the standard initial background confirmation line: [job_id] pid
                 System.out.printf("[%d] %d\n", activeJob.id, activeJob.pid);
             } else {
-                // Foreground process: wait for it to complete
                 process.waitFor();
             }
 
         } catch (IOException | InterruptedException e) {
             System.out.println(tokens[0] + ": command not found");
         }
+    }
+
+    private static String getPath(String command) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null) return null;
+        
+        String[] directories = pathEnv.split(":");
+        for (String directory : directories) {
+            java.io.File file = new java.io.File(directory, command);
+            if (file.exists() && file.isFile() && file.canExecute()) {
+                return file.getAbsolutePath();
+            }
+        }
+        return null;
     }
 }
