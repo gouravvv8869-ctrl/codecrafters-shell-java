@@ -2,22 +2,27 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 public class Main {
     private static final Set<String> BUILTINS = Set.of("echo", "exit", "type");
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
         while (true) {
             System.out.print("$ ");
             String input = reader.readLine();
             if (input == null) break;
+            if (input.isEmpty()) continue;
 
-            if (input.equals("exit") || input.startsWith("exit ")) {
+            String[] parts = input.trim().split("\\s+");
+            String command = parts[0];
+
+            if (command.equals("exit")) {
                 int code = 0;
-                String[] parts = input.split("\\s+");
                 if (parts.length > 1) {
                     try {
                         code = Integer.parseInt(parts[1]);
@@ -26,14 +31,14 @@ public class Main {
                     }
                 }
                 System.exit(code);
-            } else if (input.startsWith("echo ")) {
-                String message = input.substring(5);
+            } else if (command.equals("echo")) {
+                String message = input.length() > 5 ? input.substring(5) : "";
                 System.out.println(message);
-            } else if (input.equals("type") || input.startsWith("type ")) {
-                String arg = input.equals("type") ? "" : input.substring(5).trim();
-                if (arg.isEmpty()) {
+            } else if (command.equals("type")) {
+                if (parts.length < 2) {
                     continue;
                 }
+                String arg = parts[1];
                 if (BUILTINS.contains(arg)) {
                     System.out.println(arg + " is a shell builtin");
                 } else {
@@ -45,24 +50,26 @@ public class Main {
                     }
                 }
             } else {
-                System.out.println(input + ": command not found");
+                String executablePath = findInPath(command);
+                if (executablePath != null) {
+                    runExternalProgram(command, parts);
+                } else {
+                    System.out.println(command + ": command not found");
+                }
             }
         }
     }
 
-    private static String findInPath(String command) {
-        String pathEnv = System.getenv("PATH");
-        if (pathEnv == null || pathEnv.isEmpty()) {
-            return null;
-        }
-
-        String[] dirs = pathEnv.split(File.pathSeparator);
-        for (String dir : dirs) {
-            File candidate = new File(dir, command);
-            if (candidate.isFile() && candidate.canExecute()) {
-                return candidate.getPath();
+    private static void runExternalProgram(String command, String[] parts) {
+        try {
+            List<String> commandList = new ArrayList<>();
+            commandList.add(command); // argv[0] should be the command name, not the full path
+            for (int i = 1; i < parts.length; i++) {
+                commandList.add(parts[i]);
             }
-        }
-        return null;
-    }
-}
+
+            ProcessBuilder builder = new ProcessBuilder(commandList);
+            builder.inheritIO(); // pipe child's stdin/stdout/stderr straight through
+            Process process = builder.start();
+            process.waitFor();
+        } catch (IOException | InterruptedException e)
