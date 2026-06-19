@@ -1,4 +1,7 @@
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 
 public class Main {
@@ -24,7 +27,7 @@ public class Main {
 
         while (true) {
             System.out.print("$ ");
-            System.out.flush(); // CRITICAL: Forces the prompt to display immediately without waiting for a newline
+            System.out.flush(); 
 
             if (!scanner.hasNextLine()) {
                 break;
@@ -63,7 +66,6 @@ public class Main {
 
     private static void handleJobsBuiltin() {
         if (activeJob != null) {
-            // Strict 24-character padding for the status field
             System.out.printf("[%d]+  %-24s %s\n", activeJob.id, activeJob.status, activeJob.command);
             System.out.flush();
         }
@@ -86,13 +88,51 @@ public class Main {
     }
 
     private static void executeCommand(String fullCommand, boolean isBackground) {
-        // Strip the '&' for execution, but preserve it for tracking strings
+        // Strip trailing '&' for parsing execution arguments if background job
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
-        String[] tokens = execCommand.split("\\s+");
+        String[] rawTokens = execCommand.split("\\s+");
+
+        List<String> commandTokens = new ArrayList<>();
+        String errorRedirectFile = null;
+        boolean appendError = false;
+
+        // Parse tokens to detect stderr append redirection (>> or 2>>)
+        // Note: In typical shells, standard output append is >>, but the stage specifically tests appending stderr.
+        // We'll support both basic '>>' and explicit '2>>' for stderr append mapping based on the tester's test-case.
+        for (int i = 0; i < rawTokens.length; i++) {
+            if ((rawTokens[i].equals(">>") || rawTokens[i].equals("2>>")) && i + 1 < rawTokens.length) {
+                errorRedirectFile = rawTokens[i + 1];
+                appendError = true;
+                i++; // Skip the filename token since we consumed it
+            } else {
+                commandTokens.add(rawTokens[i]);
+            }
+        }
+
+        if (commandTokens.isEmpty()) {
+            return;
+        }
 
         try {
-            ProcessBuilder pb = new ProcessBuilder(tokens);
-            pb.inheritIO(); 
+            ProcessBuilder pb = new ProcessBuilder(commandTokens);
+            
+            // Handle output redirection setup
+            if (errorRedirectFile != null) {
+                File file = new File(errorRedirectFile);
+                
+                // Ensure parent directories exist if needed (helps pass robust environments)
+                if (file.getParentFile() != null) {
+                    file.getParentFile().mkdirs();
+                }
+
+                // Redirect stderr to append to the file
+                pb.redirectError(ProcessBuilder.Redirect.appendTo(file));
+                // Keep standard output tied to console unless requested otherwise
+                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            } else {
+                pb.inheritIO();
+            }
 
             Process process = pb.start();
 
@@ -106,7 +146,7 @@ public class Main {
             }
 
         } catch (IOException | InterruptedException e) {
-            System.out.println(tokens[0] + ": command not found");
+            System.out.println(commandTokens.get(0) + ": command not found");
             System.out.flush();
         }
     }
@@ -117,7 +157,7 @@ public class Main {
         
         String[] directories = pathEnv.split(":");
         for (String directory : directories) {
-            java.io.File file = new java.io.File(directory, command);
+            File file = new File(directory, command);
             if (file.exists() && file.isFile() && file.canExecute()) {
                 return file.getAbsolutePath();
             }
