@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Set;
@@ -31,17 +32,37 @@ public class Main {
             } else if (input.equals("type") || input.startsWith("type ")) {
                 String arg = input.equals("type") ? "" : input.substring(5).trim();
                 if (arg.isEmpty()) {
-                    // no argument given; nothing meaningful to report
                     continue;
                 }
                 if (BUILTINS.contains(arg)) {
                     System.out.println(arg + " is a shell builtin");
                 } else {
-                    System.out.println(arg + ": not found");
+                    String foundPath = findInPath(arg);
+                    if (foundPath != null) {
+                        System.out.println(arg + " is " + foundPath);
+                    } else {
+                        System.out.println(arg + ": not found");
+                    }
                 }
             } else {
                 System.out.println(input + ": command not found");
             }
         }
+    }
+
+    private static String findInPath(String command) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null || pathEnv.isEmpty()) {
+            return null;
+        }
+
+        String[] dirs = pathEnv.split(File.pathSeparator);
+        for (String dir : dirs) {
+            File candidate = new File(dir, command);
+            if (candidate.isFile() && candidate.canExecute()) {
+                return candidate.getPath();
+            }
+        }
+        return null;
     }
 }
