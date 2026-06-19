@@ -1,59 +1,50 @@
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-class RedirectionResult {
-    List<String> argv = new ArrayList<>();
-    String stdoutFile = null;
-    boolean stdoutAppend = false;
-    String stderrFile = null;
-    boolean stderrAppend = false;
+class Job {
+    int id;
+    long pid;
+    String command;
+    String status;
+
+    Job(int id, long pid, String command, String status) {
+        this.id = id;
+        this.pid = pid;
+        this.command = command;
+        this.status = status;
+    }
 }
 
-class RedirectionParser {
+class JobTable {
+    private final Map<Integer, Job> jobs = new LinkedHashMap<>();
+    private int nextJobId = 1;
+    private int mostRecentJobId = -1;
 
-    // tokens = the already-tokenized command line, e.g. ["ls", "-1", "nonexistent", ">>", "/tmp/cow/ant.md"]
-    // Handles: >  1>  >>  1>>  2>  2>>
-    static RedirectionResult parse(List<String> tokens) {
-        RedirectionResult result = new RedirectionResult();
+    Job addJob(long pid, String command) {
+        int id = nextJobId++;
+        Job job = new Job(id, pid, command, "Running");
+        jobs.put(id, job);
+        mostRecentJobId = id;
+        return job;
+    }
 
-        int i = 0;
-        while (i < tokens.size()) {
-            String tok = tokens.get(i);
+    Map<Integer, Job> getJobs() {
+        return jobs;
+    }
 
-            switch (tok) {
-                case ">":
-                case "1>":
-                    result.stdoutFile = tokens.get(i + 1);
-                    result.stdoutAppend = false;
-                    i += 2;
-                    break;
+    int getMostRecentJobId() {
+        return mostRecentJobId;
+    }
+}
 
-                case ">>":
-                case "1>>":
-                    result.stdoutFile = tokens.get(i + 1);
-                    result.stdoutAppend = true;
-                    i += 2;
-                    break;
+// In your builtin dispatcher:
+static void runJobsBuiltin(JobTable jobTable) {
+    Map<Integer, Job> jobs = jobTable.getJobs();
+    int mostRecent = jobTable.getMostRecentJobId();
 
-                case "2>":
-                    result.stderrFile = tokens.get(i + 1);
-                    result.stderrAppend = false;
-                    i += 2;
-                    break;
-
-                case "2>>":
-                    result.stderrFile = tokens.get(i + 1);
-                    result.stderrAppend = true;
-                    i += 2;
-                    break;
-
-                default:
-                    result.argv.add(tok);
-                    i += 1;
-                    break;
-            }
-        }
-
-        return result;
+    for (Job job : jobs.values()) {
+        char marker = (job.id == mostRecent) ? '+' : '-';
+        String statusField = String.format("%-24s", job.status);
+        System.out.println("[" + job.id + "]" + marker + "  " + statusField + job.command + " &");
     }
 }
