@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Set;
 
 public class Main {
-    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd");
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
 
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -104,6 +104,12 @@ public class Main {
                 if (parsed.errorFile != null) {
                     writeToFile(parsed.errorFile, "", parsed.appendError);
                 }
+            } else if (command.equals("jobs")) {
+                // Empty implementation for this stage - just do nothing
+                if (parsed.errorFile != null) {
+                    writeToFile(parsed.errorFile, "", parsed.appendError);
+                }
+                // No output for now
             } else {
                 // External command
                 String executablePath = findInPath(command);
@@ -126,7 +132,7 @@ public class Main {
         String outputFile = null;
         boolean appendOutput = false;
         String errorFile = null;
-        boolean appendError = false;     // New: for 2>>
+        boolean appendError = false;
     }
 
     private static ParseResult parseCommand(String[] parts) {
