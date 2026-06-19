@@ -15,8 +15,12 @@ public class Main {
         while (true) {
             System.out.print("$ ");
             String input = reader.readLine();
-            if (input == null) break;
-            if (input.isEmpty()) continue;
+            if (input == null) {
+                break;
+            }
+            if (input.trim().isEmpty()) {
+                continue;
+            }
 
             String[] parts = input.trim().split("\\s+");
             String command = parts[0];
@@ -63,13 +67,33 @@ public class Main {
     private static void runExternalProgram(String command, String[] parts) {
         try {
             List<String> commandList = new ArrayList<>();
-            commandList.add(command); // argv[0] should be the command name, not the full path
+            commandList.add(command);
             for (int i = 1; i < parts.length; i++) {
                 commandList.add(parts[i]);
             }
 
             ProcessBuilder builder = new ProcessBuilder(commandList);
-            builder.inheritIO(); // pipe child's stdin/stdout/stderr straight through
+            builder.inheritIO();
             Process process = builder.start();
             process.waitFor();
-        } catch (IOException | InterruptedException e)
+        } catch (IOException | InterruptedException e) {
+            System.out.println(command + ": command not found");
+        }
+    }
+
+    private static String findInPath(String command) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null || pathEnv.isEmpty()) {
+            return null;
+        }
+
+        String[] dirs = pathEnv.split(File.pathSeparator);
+        for (String dir : dirs) {
+            File candidate = new File(dir, command);
+            if (candidate.isFile() && candidate.canExecute()) {
+                return candidate.getPath();
+            }
+        }
+        return null;
+    }
+}
