@@ -11,7 +11,7 @@ public class Main {
         long pid;
         String command;
         String status;
-        Process process; // Store reference to the Java Process object for lifecycle pooling
+        Process process;
 
         public BackgroundJob(int id, long pid, String command, Process process) {
             this.id = id;
@@ -29,6 +29,9 @@ public class Main {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
+            // --- Point 1: Automatic Reaping before the prompt is printed ---
+            reapAndPrintCompletedJobs();
+
             System.out.print("$ ");
             System.out.flush(); 
 
@@ -85,45 +88,71 @@ public class Main {
         scanner.close();
     }
 
-    private static void handleJobsBuiltin() {
+    /**
+     * Reuses the core engine to look through current jobs, update dead ones to 'Done',
+     * print them using dynamic marker positions, and flush them cleanly from memory.
+     */
+    private static void reapAndPrintCompletedJobs() {
         int totalJobs = activeJobs.size();
         List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
+        // Check and mark dead processes first
+        for (BackgroundJob job : activeJobs) {
+            if (job.status.equals("Running") && !job.process.isAlive()) {
+                job.status = "Done";
+            }
+        }
+
+        // Render ONLY the 'Done' ones if calling from the general prompt point
         for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
             
-            // Check if the process has stopped executing in the background
-            if (!job.process.isAlive()) {
-                job.status = "Done";
-            }
-
-            String symbol;
-            if (i == totalJobs - 1) {
-                symbol = "+";
-            } else if (i == totalJobs - 2) {
-                symbol = "-";
-            } else {
-                symbol = " ";
-            }
-
-            // If the job is Done, print it WITHOUT the trailing '&'
             if (job.status.equals("Done")) {
-                // Strip out trailing '&' from the stored command layout representation
+                String symbol;
+                if (i == totalJobs - 1) {
+                    symbol = "+";
+                } else if (i == totalJobs - 2) {
+                    symbol = "-";
+                } else {
+                    symbol = " ";
+                }
+
                 String cleanCmd = job.command;
                 if (cleanCmd.endsWith("&")) {
                     cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
                 }
                 System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
                 jobsToRemove.add(job);
-            } else {
-                // Still executing: Print standard raw command layout WITH trailing '&'
-                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
             }
         }
         System.out.flush();
 
-        // Clear reaped jobs out of the table entirely so the next invocation is empty
+        // Clear reaped items out of active table completely
         activeJobs.removeAll(jobsToRemove);
+    }
+
+    // --- Point 2: Custom Handling Inside the Jobs Builtin ---
+    private static void handleJobsBuiltin() {
+        // Run reaping check first to print any newly completed jobs
+        reapAndPrintCompletedJobs();
+
+        // Now print the remaining active running jobs with freshly shifted markers
+        int remainingTotal = activeJobs.size();
+        for (int i = 0; i < remainingTotal; i++) {
+            BackgroundJob job = activeJobs.get(i);
+            String symbol;
+            
+            if (i == remainingTotal - 1) {
+                symbol = "+";
+            } else if (i == remainingTotal - 2) {
+                symbol = "-";
+            } else {
+                symbol = " ";
+            }
+
+            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+        }
+        System.out.flush();
     }
 
     private static void handleTypeBuiltin(List<String> tokens) {
@@ -295,8 +324,7 @@ public class Main {
 
             if (isBackground) {
                 long pid = process.toHandle().pid();
-                int nextJobId = activeJobs.size() + 1;
-                // Pass the process object instance down to the job constructor tracking table
+                int nextJobId = activeJobs.isEmpty() ? 1 : activeJobs.get(activeJobs.size() - 1).id + 1;
                 BackgroundJob newJob = new BackgroundJob(nextJobId, pid, fullCommand, process);
                 activeJobs.add(newJob);
                 
