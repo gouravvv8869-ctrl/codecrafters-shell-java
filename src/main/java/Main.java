@@ -2,6 +2,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -73,21 +75,19 @@ public class Main {
     }
 
     private static void changeDirectory(String targetPath) {
-        File target = new File(targetPath);
-        if (target.isAbsolute()) {
-            if (target.isDirectory()) {
-                System.setProperty("user.dir", target.getAbsolutePath());
-            } else {
-                System.out.println("cd: " + targetPath + ": No such file or directory");
-            }
+        Path currentDir = Paths.get(System.getProperty("user.dir"));
+        Path target;
+        if (Paths.get(targetPath).isAbsolute()) {
+            target = Paths.get(targetPath).normalize();
         } else {
-            // Relative paths and ~ are handled in later stages.
-            File resolved = new File(System.getProperty("user.dir"), targetPath);
-            if (resolved.isDirectory()) {
-                System.setProperty("user.dir", resolved.getAbsolutePath());
-            } else {
-                System.out.println("cd: " + targetPath + ": No such file or directory");
-            }
+            target = currentDir.resolve(targetPath).normalize();
+        }
+
+        File targetFile = target.toFile();
+        if (targetFile.isDirectory()) {
+            System.setProperty("user.dir", target.toString());
+        } else {
+            System.out.println("cd: " + targetPath + ": No such file or directory");
         }
     }
 
