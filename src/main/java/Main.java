@@ -25,6 +25,9 @@ public class Main {
             }
 
             String[] parts = input.trim().split("\\s+");
+            for (int i = 0; i < parts.length; i++) {
+                parts[i] = parts[i].trim();
+            }
             String command = parts[0];
 
             if (command.equals("exit")) {
@@ -75,6 +78,16 @@ public class Main {
     }
 
     private static void changeDirectory(String targetPath) {
+        targetPath = targetPath.trim();
+        if (targetPath.equals("~")) {
+            String home = System.getenv("HOME");
+            if (home == null) {
+                System.out.println("cd: HOME not set");
+                return;
+            }
+            targetPath = home;
+        }
+
         Path currentDir = Paths.get(System.getProperty("user.dir"));
         Path target;
         if (Paths.get(targetPath).isAbsolute()) {
