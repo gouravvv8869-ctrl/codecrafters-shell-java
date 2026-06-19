@@ -87,44 +87,92 @@ public class Main {
         System.out.flush();
     }
 
+    // Modern lexical analyzer to split string into tokens respecting shell quoting rules
+    private static List<String> parseTokens(String input) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder currentToken = new StringBuilder();
+        
+        boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
+        boolean escaped = false;
+        boolean tokenActive = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (escaped) {
+                currentToken.append(c);
+                escaped = false;
+                tokenActive = true;
+            } else if (c == '\\' && !inSingleQuotes) {
+                // If in double quotes, backslash only escapes specific characters like ", \, $, `
+                if (inDoubleQuotes) {
+                    if (i + 1 < input.length() && ("\"\\$`".indexOf(input.charAt(i + 1)) != -1)) {
+                        escaped = true;
+                    } else {
+                        currentToken.append(c);
+                    }
+                } else {
+                    escaped = true;
+                }
+                tokenActive = true;
+            } else if (c == '\'' && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes;
+                tokenActive = true; // Handles empty quotes '' as an empty string argument
+            } else if (c == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes;
+                tokenActive = true;
+            } else if (Character.isWhitespace(c) && !inSingleQuotes && !inDoubleQuotes) {
+                if (tokenActive || currentToken.length() > 0) {
+                    tokens.add(currentToken.toString());
+                    currentToken.setLength(0);
+                    tokenActive = false;
+                }
+            } else {
+                currentToken.append(c);
+                tokenActive = true;
+            }
+        }
+
+        if (tokenActive || currentToken.length() > 0) {
+            tokens.add(currentToken.toString());
+        }
+
+        return tokens;
+    }
+
     private static void executeCommand(String fullCommand, boolean isBackground) {
         String execCommand = isBackground ? fullCommand.substring(0, fullCommand.length() - 1).trim() : fullCommand;
-        String[] rawTokens = execCommand.split("\\s+");
+        
+        // Use the new quote-aware parser instead of split("\\s+")
+        List<String> rawTokens = parseTokens(execCommand);
 
         List<String> commandTokens = new ArrayList<>();
-        
         String stdoutRedirectFile = null;
         String stderrRedirectFile = null;
         boolean appendStdout = false;
         boolean appendStderr = false;
 
-        for (int i = 0; i < rawTokens.length; i++) {
-            // Check explicit stdout variations: > or 1>
-            if ((rawTokens[i].equals(">") || rawTokens[i].equals("1>")) && i + 1 < rawTokens.length) {
-                stdoutRedirectFile = rawTokens[i + 1];
+        for (int i = 0; i < rawTokens.size(); i++) {
+            String token = rawTokens.get(i);
+            if ((token.equals(">") || token.equals("1>")) && i + 1 < rawTokens.size()) {
+                stdoutRedirectFile = rawTokens.get(i + 1);
                 appendStdout = false;
                 i++;
-            } 
-            // Check explicit stdout append variations: >> or 1>>
-            else if ((rawTokens[i].equals(">>") || rawTokens[i].equals("1>>")) && i + 1 < rawTokens.length) {
-                stdoutRedirectFile = rawTokens[i + 1];
+            } else if ((token.equals(">>") || token.equals("1>>")) && i + 1 < rawTokens.size()) {
+                stdoutRedirectFile = rawTokens.get(i + 1);
                 appendStdout = true;
                 i++;
-            } 
-            // Check stderr overwrite: 2>
-            else if (rawTokens[i].equals("2>") && i + 1 < rawTokens.length) {
-                stderrRedirectFile = rawTokens[i + 1];
+            } else if (token.equals("2>") && i + 1 < rawTokens.size()) {
+                stderrRedirectFile = rawTokens.get(i + 1);
                 appendStderr = false;
                 i++;
-            } 
-            // Check stderr append: 2>>
-            else if (rawTokens[i].equals("2>>") && i + 1 < rawTokens.length) {
-                stderrRedirectFile = rawTokens[i + 1];
+            } else if (token.equals("2>>") && i + 1 < rawTokens.size()) {
+                stderrRedirectFile = rawTokens.get(i + 1);
                 appendStderr = true;
                 i++;
-            } 
-            else {
-                commandTokens.add(rawTokens[i]);
+            } else {
+                commandTokens.add(token);
             }
         }
 
@@ -132,8 +180,6 @@ public class Main {
             return;
         }
 
-        // Quick fallback mechanism for the "echo" command if implemented natively/externally
-        // Ensuring it behaves predictably with ProcessBuilder execution arrays
         try {
             ProcessBuilder pb = new ProcessBuilder(commandTokens);
             
