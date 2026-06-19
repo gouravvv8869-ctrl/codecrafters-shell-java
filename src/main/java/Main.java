@@ -24,9 +24,9 @@ public class Main {
                 continue;
             }
 
-            String[] parts = input.trim().split("\\s+");
-            for (int i = 0; i < parts.length; i++) {
-                parts[i] = parts[i].trim();
+            String[] parts = tokenize(input);
+            if (parts.length == 0) {
+                continue;
             }
             String command = parts[0];
 
@@ -41,8 +41,14 @@ public class Main {
                 }
                 System.exit(code);
             } else if (command.equals("echo")) {
-                String message = input.length() > 5 ? input.substring(5) : "";
-                System.out.println(message);
+                StringBuilder message = new StringBuilder();
+                for (int i = 1; i < parts.length; i++) {
+                    if (i > 1) {
+                        message.append(" ");
+                    }
+                    message.append(parts[i]);
+                }
+                System.out.println(message.toString());
             } else if (command.equals("type")) {
                 if (parts.length < 2) {
                     continue;
@@ -75,6 +81,45 @@ public class Main {
                 }
             }
         }
+    }
+
+    private static String[] tokenize(String input) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuotes = false;
+        boolean hasToken = false;
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (inSingleQuotes) {
+                if (c == '\'') {
+                    inSingleQuotes = false;
+                } else {
+                    current.append(c);
+                }
+            } else {
+                if (c == '\'') {
+                    inSingleQuotes = true;
+                    hasToken = true;
+                } else if (Character.isWhitespace(c)) {
+                    if (hasToken) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                        hasToken = false;
+                    }
+                } else {
+                    current.append(c);
+                    hasToken = true;
+                }
+            }
+        }
+
+        if (hasToken) {
+            tokens.add(current.toString());
+        }
+
+        return tokens.toArray(new String[0]);
     }
 
     private static void changeDirectory(String targetPath) {
