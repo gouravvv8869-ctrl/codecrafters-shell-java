@@ -84,14 +84,21 @@ public class Main {
     }
 
     private static void handleJobsBuiltin() {
-        // Appends '+' ONLY to the most recently added job to match dynamic stream indicators
-        for (int i = 0; i < activeJobs.size(); i++) {
+        int totalJobs = activeJobs.size();
+        for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
-            if (i == activeJobs.size() - 1) {
-                System.out.printf("[%d]+  %-24s %s\n", job.id, job.status, job.command);
+            String symbol;
+            
+            if (i == totalJobs - 1) {
+                symbol = "+"; // Most recent job
+            } else if (i == totalJobs - 2) {
+                symbol = "-"; // Second most recent job
             } else {
-                System.out.printf("[%d]   %-24s %s\n", job.id, job.status, job.command);
+                symbol = " "; // Older jobs
             }
+            
+            // Format strictly matches layout format: [%d]%s  %-24s %s
+            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
         }
         System.out.flush();
     }
