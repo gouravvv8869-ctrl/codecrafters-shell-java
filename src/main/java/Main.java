@@ -121,15 +121,32 @@ public class Main {
     }
 
     private static void handleJobsBuiltin() {
-        reapAndPrintCompletedJobsOnly();
+        int totalJobs = activeJobs.size();
+        List<BackgroundJob> jobsToRemove = new ArrayList<>();
 
-        int remainingTotal = activeJobs.size();
-        for (int i = 0; i < remainingTotal; i++) {
+        for (BackgroundJob job : activeJobs) {
+            if (job.status.equals("Running") && !job.process.isAlive()) {
+                job.status = "Done";
+            }
+        }
+
+        for (int i = 0; i < totalJobs; i++) {
             BackgroundJob job = activeJobs.get(i);
-            String symbol = (i == remainingTotal - 1) ? "+" : (i == remainingTotal - 2) ? "-" : " ";
-            System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            String symbol = (i == totalJobs - 1) ? "+" : (i == totalJobs - 2) ? "-" : " ";
+
+            if (job.status.equals("Done")) {
+                String cleanCmd = job.command;
+                if (cleanCmd.endsWith("&")) {
+                    cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
+                }
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, cleanCmd);
+                jobsToRemove.add(job);
+            } else {
+                System.out.printf("[%d]%s  %-24s %s\n", job.id, symbol, job.status, job.command);
+            }
         }
         System.out.flush();
+        activeJobs.removeAll(jobsToRemove);
     }
 
     private static boolean isBuiltIn(String cmd) {
@@ -138,7 +155,6 @@ public class Main {
 
     /**
      * Executes arbitrary-stage pipelines natively using ProcessBuilder.startPipeline.
-     * Built-ins are seamlessly caught and piped if encountered at the stream boundaries.
      */
     private static void executeMultiStagePipeline(List<String> rawTokens, boolean isBackground, String rawInput) {
         List<String> tokens = new ArrayList<>(rawTokens);
@@ -146,7 +162,6 @@ public class Main {
             tokens.remove(tokens.size() - 1);
         }
 
-        // Split tokens across arbitrary number of pipe symbols "|"
         List<List<String>> commandsTokensList = new ArrayList<>();
         List<String> currentCmdTokens = new ArrayList<>();
         for (String token : tokens) {
@@ -165,7 +180,7 @@ public class Main {
 
         if (commandsTokensList.isEmpty()) return;
 
-        // Fallback optimized single built-in boundary handling logic
+        // Fallback optimizations for single built-in boundary handling logic
         String firstCmdName = commandsTokensList.get(0).get(0);
         if (commandsTokensList.size() == 2 && isBuiltIn(firstCmdName)) {
             executeTwoStageBuiltInLeft(commandsTokensList.get(0), commandsTokensList.get(1), isBackground, rawInput);
@@ -179,23 +194,34 @@ public class Main {
 
         // Standard dynamic process construction flow
         List<ProcessBuilder> builders = new ArrayList<>();
-        for (List<String> cmdTokens : commandsTokensList) {
+        int size = commandsTokensList.size();
+
+        for (int i = 0; i < size; i++) {
+            List<String> cmdTokens = commandsTokensList.get(i);
             ProcessBuilder pb = new ProcessBuilder(cmdTokens).directory(currentWorkingDirectory);
-            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
-            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+
+            // Configure Redirect.PIPE layout for intermediate steps to satisfy startPipeline()
+            if (i == 0) {
+                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+            } else if (i == size - 1) {
+                pb.redirectInput(ProcessBuilder.Redirect.PIPE);
+                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            } else {
+                pb.redirectInput(ProcessBuilder.Redirect.PIPE);
+                pb.redirectOutput(ProcessBuilder.Redirect.PIPE);
+            }
             builders.add(pb);
         }
 
         try {
-            // Fork and wire standard stream pipes across N-processes sequentially
             List<Process> pipelineProcesses = ProcessBuilder.startPipeline(builders);
             Process finalProcess = pipelineProcesses.get(pipelineProcesses.size() - 1);
 
             if (isBackground) {
                 trackBackgroundJob(finalProcess, rawInput);
             } else {
-                // Blocking foreground waits until the trailing command terminates standard execution
                 finalProcess.waitFor();
             }
         } catch (IOException | InterruptedException e) {
