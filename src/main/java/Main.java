@@ -2,6 +2,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -28,13 +29,17 @@ public class Main {
             if (parts.length == 0) {
                 continue;
             }
-            String command = parts[0];
+
+            // Parse command, arguments and redirections
+            ParseResult parsed = parseCommand(parts);
+
+            String command = parsed.command;
 
             if (command.equals("exit")) {
                 int code = 0;
-                if (parts.length > 1) {
+                if (parsed.args.size() > 0) {
                     try {
-                        code = Integer.parseInt(parts[1]);
+                        code = Integer.parseInt(parsed.args.get(0));
                     } catch (NumberFormatException e) {
                         code = 0;
                     }
@@ -42,18 +47,19 @@ public class Main {
                 System.exit(code);
             } else if (command.equals("echo")) {
                 StringBuilder message = new StringBuilder();
-                for (int i = 1; i < parts.length; i++) {
-                    if (i > 1) {
-                        message.append(" ");
-                    }
-                    message.append(parts[i]);
+                for (int i = 0; i < parsed.args.size(); i++) {
+                    if (i > 0) message.append(" ");
+                    message.append(parsed.args.get(i));
                 }
-                System.out.println(message.toString());
+                if (parsed.outputFile != null) {
+                    writeToFile(parsed.outputFile, message.toString() + "\n");
+                } else {
+                    System.out.println(message);
+                }
             } else if (command.equals("type")) {
-                if (parts.length < 2) {
-                    continue;
-                }
-                String arg = parts[1];
+                // For simplicity, type doesn't support redirection in this stage
+                if (parsed.args.isEmpty()) continue;
+                String arg = parsed.args.get(0);
                 if (BUILTINS.contains(arg)) {
                     System.out.println(arg + " is a shell builtin");
                 } else {
@@ -65,22 +71,58 @@ public class Main {
                     }
                 }
             } else if (command.equals("pwd")) {
-                System.out.println(System.getProperty("user.dir"));
-            } else if (command.equals("cd")) {
-                if (parts.length < 2) {
-                    continue;
+                String output = System.getProperty("user.dir");
+                if (parsed.outputFile != null) {
+                    writeToFile(parsed.outputFile, output + "\n");
+                } else {
+                    System.out.println(output);
                 }
-                String targetPath = parts[1];
-                changeDirectory(targetPath);
+            } else if (command.equals("cd")) {
+                if (!parsed.args.isEmpty()) {
+                    changeDirectory(parsed.args.get(0));
+                }
             } else {
+                // External command
                 String executablePath = findInPath(command);
                 if (executablePath != null) {
-                    runExternalProgram(command, parts);
+                    runExternalProgram(command, parsed.args, parsed.outputFile);
                 } else {
                     System.out.println(command + ": command not found");
                 }
             }
         }
+    }
+
+    private static class ParseResult {
+        String command;
+        List<String> args = new ArrayList<>();
+        String outputFile = null;
+    }
+
+    private static ParseResult parseCommand(String[] parts) {
+        ParseResult result = new ParseResult();
+        int i = 0;
+
+        if (parts.length == 0) return result;
+
+        result.command = parts[i++];
+
+        while (i < parts.length) {
+            String token = parts[i];
+            if (token.equals(">") || token.equals("1>")) {
+                i++;
+                if (i < parts.length) {
+                    result.outputFile = parts[i];
+                    i++;
+                }
+                // Only support one redirection for now
+                break;
+            } else {
+                result.args.add(token);
+                i++;
+            }
+        }
+        return result;
     }
 
     private static String[] tokenize(String input) {
@@ -103,11 +145,9 @@ public class Main {
                     if (i + 1 < input.length()) {
                         char next = input.charAt(i + 1);
                         if (next == '"' || next == '\\') {
-                            // Only escape " and \ inside double quotes (for this stage)
                             current.append(next);
-                            i++; // consume the escaped character
+                            i++;
                         } else {
-                            // For all other characters, backslash is literal
                             current.append(c);
                         }
                     } else {
@@ -119,7 +159,6 @@ public class Main {
                     current.append(c);
                 }
             } else {
-                // Outside any quotes
                 if (c == '\\') {
                     if (i + 1 < input.length()) {
                         i++;
@@ -149,6 +188,37 @@ public class Main {
         return tokens.toArray(new String[0]);
     }
 
+    private static void writeToFile(String filename, String content) {
+        try (PrintStream ps = new PrintStream(filename)) {
+            ps.print(content);
+        } catch (IOException e) {
+            System.out.println("Error writing to file: " + e.getMessage());
+        }
+    }
+
+    private static void runExternalProgram(String command, List<String> args, String outputFile) {
+        try {
+            List<String> commandList = new ArrayList<>();
+            commandList.add(command);
+            commandList.addAll(args);
+
+            ProcessBuilder builder = new ProcessBuilder(commandList);
+            builder.directory(new File(System.getProperty("user.dir")));
+
+            if (outputFile != null) {
+                builder.redirectOutput(new File(outputFile));
+                // Do NOT redirect error - errors should go to terminal
+            } else {
+                builder.inheritIO();
+            }
+
+            Process process = builder.start();
+            process.waitFor();
+        } catch (IOException | InterruptedException e) {
+            System.out.println(command + ": command not found");
+        }
+    }
+
     private static void changeDirectory(String targetPath) {
         targetPath = targetPath.trim();
         if (targetPath.equals("~")) {
@@ -173,23 +243,6 @@ public class Main {
             System.setProperty("user.dir", target.toString());
         } else {
             System.out.println("cd: " + targetPath + ": No such file or directory");
-        }
-    }
-
-    private static void runExternalProgram(String command, String[] parts) {
-        try {
-            List<String> commandList = new ArrayList<>();
-            for (String part : parts) {
-                commandList.add(part);
-            }
-
-            ProcessBuilder builder = new ProcessBuilder(commandList);
-            builder.directory(new File(System.getProperty("user.dir")));
-            builder.inheritIO();
-            Process process = builder.start();
-            process.waitFor();
-        } catch (IOException | InterruptedException e) {
-            System.out.println(command + ": command not found");
         }
     }
 
