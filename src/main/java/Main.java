@@ -4,8 +4,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.Set;
 
 public class Main {
+
+    private static final Set<String> BUILTINS = Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
 
     // ---------- Job tracking ----------
 
@@ -82,8 +85,14 @@ public class Main {
             } else if (cmdName.equals("jobs")) {
                 runJobsBuiltin();
                 continue;
+            } else if (cmdName.equals("type")) {
+                runTypeBuiltin(argv);
+                continue;
             } else if (cmdName.equals("cd")) {
-                // existing cd logic would go here
+                runCdBuiltin(argv);
+                continue;
+            } else if (cmdName.equals("pwd")) {
+                System.out.println(System.getProperty("user.dir"));
                 continue;
             } else if (cmdName.equals("echo")) {
                 System.out.println(String.join(" ", argv.subList(1, argv.size())));
@@ -132,6 +141,48 @@ public class Main {
             char marker = (job.id == mostRecent) ? '+' : '-';
             String statusField = String.format("%-24s", job.status);
             System.out.println("[" + job.id + "]" + marker + "  " + statusField + job.command + " &");
+        }
+    }
+
+    // ---------- type builtin ----------
+
+    static void runTypeBuiltin(List<String> argv) {
+        if (argv.size() < 2) {
+            return;
+        }
+        String target = argv.get(1);
+
+        if (BUILTINS.contains(target)) {
+            System.out.println(target + " is a shell builtin");
+            return;
+        }
+
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv != null) {
+            for (String dir : pathEnv.split(":")) {
+                java.io.File candidate = new java.io.File(dir, target);
+                if (candidate.isFile() && candidate.canExecute()) {
+                    System.out.println(target + " is " + candidate.getPath());
+                    return;
+                }
+            }
+        }
+
+        System.out.println(target + ": not found");
+    }
+
+    // ---------- cd builtin ----------
+
+    static void runCdBuiltin(List<String> argv) {
+        String target = argv.size() > 1 ? argv.get(1) : System.getProperty("user.home");
+        if (target.equals("~")) {
+            target = System.getProperty("user.home");
+        }
+        java.io.File dir = new java.io.File(target);
+        if (dir.isDirectory()) {
+            System.setProperty("user.dir", dir.getAbsolutePath());
+        } else {
+            System.out.println("cd: " + target + ": No such file or directory");
         }
     }
 }
